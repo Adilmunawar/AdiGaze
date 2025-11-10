@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Sparkles, Award, MapPin, Download } from 'lucide-react';
+import { Search, Sparkles, Award, MapPin, Download, X, Bookmark } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -37,9 +37,93 @@ export const CandidateHunting = () => {
   const [matches, setMatches] = useState<CandidateMatch[]>([]);
   const [totalCandidates, setTotalCandidates] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
   const { toast } = useToast();
   
   const itemsPerPage = 10;
+
+  // Fetch bookmarks on mount
+  useEffect(() => {
+    fetchBookmarks();
+  }, []);
+
+  const fetchBookmarks = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('candidate_bookmarks')
+        .select('candidate_id');
+
+      if (error) throw error;
+
+      setBookmarkedIds(new Set(data?.map(b => b.candidate_id) || []));
+    } catch (error) {
+      console.error('Error fetching bookmarks:', error);
+    }
+  };
+
+  const toggleBookmark = async (candidateId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: 'Authentication Required',
+          description: 'Please sign in to bookmark candidates',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const isBookmarked = bookmarkedIds.has(candidateId);
+
+      if (isBookmarked) {
+        const { error } = await supabase
+          .from('candidate_bookmarks')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('candidate_id', candidateId);
+
+        if (error) throw error;
+
+        setBookmarkedIds(prev => {
+          const next = new Set(prev);
+          next.delete(candidateId);
+          return next;
+        });
+
+        toast({
+          title: 'Bookmark Removed',
+          description: 'Candidate removed from bookmarks',
+        });
+      } else {
+        const { error } = await supabase
+          .from('candidate_bookmarks')
+          .insert({
+            user_id: user.id,
+            candidate_id: candidateId,
+          });
+
+        if (error) throw error;
+
+        setBookmarkedIds(prev => new Set(prev).add(candidateId));
+
+        toast({
+          title: 'Bookmarked!',
+          description: 'Candidate saved for later review',
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling bookmark:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update bookmark',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const exportToCSV = () => {
     if (matches.length === 0) {
@@ -112,6 +196,18 @@ export const CandidateHunting = () => {
     toast({
       title: 'CSV Exported Successfully',
       description: `Exported ${matches.length} candidates to CSV`,
+    });
+  };
+
+  const handleClearResults = () => {
+    setMatches([]);
+    setTotalCandidates(0);
+    setCurrentPage(1);
+    setJobDescription('');
+    setShowBookmarkedOnly(false);
+    toast({
+      title: 'Results Cleared',
+      description: 'Ready for a new search',
     });
   };
 
@@ -198,26 +294,53 @@ export const CandidateHunting = () => {
       </Card>
 
       {matches.length > 0 && (() => {
-        const totalPages = Math.ceil(matches.length / itemsPerPage);
+        const filteredMatches = showBookmarkedOnly 
+          ? matches.filter(m => bookmarkedIds.has(m.id))
+          : matches;
+        const totalPages = Math.ceil(filteredMatches.length / itemsPerPage);
         const startIndex = (currentPage - 1) * itemsPerPage;
         const endIndex = startIndex + itemsPerPage;
-        const currentMatches = matches.slice(startIndex, endIndex);
+        const currentMatches = filteredMatches.slice(startIndex, endIndex);
         
         return (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
-                <Award className="h-6 w-6 text-primary" />
-                Ranked Candidates ({matches.length} of {totalCandidates})
-              </h3>
-              <Button
-                onClick={exportToCSV}
-                variant="outline"
-                className="flex items-center gap-2 bg-gradient-to-r from-primary/10 to-secondary/10 hover:from-primary/20 hover:to-secondary/20 border-primary/30"
-              >
-                <Download className="h-4 w-4" />
-                Export to CSV
-              </Button>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-4">
+                <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                  <Award className="h-6 w-6 text-primary" />
+                  Ranked Candidates ({filteredMatches.length} {showBookmarkedOnly ? 'bookmarked' : `of ${totalCandidates}`})
+                </h3>
+                <Button
+                  onClick={() => {
+                    setShowBookmarkedOnly(!showBookmarkedOnly);
+                    setCurrentPage(1);
+                  }}
+                  variant={showBookmarkedOnly ? "default" : "outline"}
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Bookmark className={`h-4 w-4 ${showBookmarkedOnly ? 'fill-current' : ''}`} />
+                  {showBookmarkedOnly ? 'Show All' : 'Bookmarked Only'}
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={exportToCSV}
+                  variant="outline"
+                  className="flex items-center gap-2 bg-gradient-to-r from-primary/10 to-secondary/10 hover:from-primary/20 hover:to-secondary/20 border-primary/30"
+                >
+                  <Download className="h-4 w-4" />
+                  Export to CSV
+                </Button>
+                <Button
+                  onClick={handleClearResults}
+                  variant="outline"
+                  className="flex items-center gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+                >
+                  <X className="h-4 w-4" />
+                  Clear Results
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-4">
@@ -240,12 +363,29 @@ export const CandidateHunting = () => {
                       )}
                     </div>
                   </div>
-                  <Badge 
-                    variant={candidate.matchScore >= 80 ? "default" : candidate.matchScore >= 60 ? "secondary" : "outline"}
-                    className="text-lg px-4 py-2 font-bold"
-                  >
-                    {candidate.matchScore}% Match
-                  </Badge>
+                  <div className="flex items-center gap-3">
+                    <Badge 
+                      variant={candidate.matchScore >= 80 ? "default" : candidate.matchScore >= 60 ? "secondary" : "outline"}
+                      className="text-lg px-4 py-2 font-bold"
+                    >
+                      {candidate.matchScore}% Match
+                    </Badge>
+                    <Button
+                      onClick={() => toggleBookmark(candidate.id)}
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto"
+                      title={bookmarkedIds.has(candidate.id) ? "Remove bookmark" : "Bookmark candidate"}
+                    >
+                      <Bookmark 
+                        className={`h-5 w-5 transition-all ${
+                          bookmarkedIds.has(candidate.id) 
+                            ? 'fill-primary text-primary' 
+                            : 'text-muted-foreground hover:text-primary'
+                        }`}
+                      />
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Contact Information - Highlighted Section */}

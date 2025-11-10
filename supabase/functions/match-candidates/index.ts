@@ -53,204 +53,144 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Found ${profiles.length} profiles, sending to AI for ranking...`);
+    console.log(`Found ${profiles.length} profiles, processing in parallel batches...`);
 
-    // Prepare candidate summaries for AI using raw resume text only
+    // Prepare candidate summaries with reduced text size for faster processing
     const candidateSummaries = profiles.map((profile, index) => {
       const text = (profile.resume_text || '').toString();
-      const snippet = text.length > 4000 ? text.slice(0, 4000) : text;
+      const snippet = text.length > 2000 ? text.slice(0, 2000) : text;
       return {
         id: profile.id,
         index,
-        summary: `Candidate ${index + 1} Resume Text:\n${snippet}`.trim()
+        summary: `Candidate ${index + 1}:\n${snippet}`.trim()
       };
     });
 
-    // Use Gemini 2.5 Flash with tool calling for structured extraction
+    // Split candidates into batches of 10 for parallel processing
+    const BATCH_SIZE = 10;
+    const batches: typeof candidateSummaries[] = [];
+    for (let i = 0; i < candidateSummaries.length; i += BATCH_SIZE) {
+      batches.push(candidateSummaries.slice(i, i + BATCH_SIZE));
+    }
+
+    // Process batches in parallel with Gemini 2.5 Flash
     const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
     
-    let aiResponse: Response | null = null;
-    let lastError = '';
-    const maxRetries = 5;
+    const processBatch = async (batch: typeof candidateSummaries, batchIndex: number) => {
+      const maxRetries = 3;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `You are an expert technical recruiter. Analyze each candidate's resume and extract details while ranking them against the job description.
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `You are an expert technical recruiter. Analyze each candidate's resume text and extract their details while ranking them against the job description.
-
-For EACH candidate, extract:
-1. Full name (look for name at the top of resume)
-2. Email address
-3. Phone number
-4. Location/Address
-5. Job title or current role
-6. Years of experience (estimate from work history)
-7. Match score (0-100) based on job requirements
-8. Key strengths that match the job
-9. Potential concerns or gaps
+For EACH candidate, extract: name, email, phone, location, job title, years of experience, match score (0-100), key strengths, and concerns.
 
 Job Description:
 ${jobDescription}
 
 Candidates:
-${candidateSummaries.map(c => c.summary).join('\n\n---\n\n')}`
-              }]
-            }],
-            tools: [{
-              function_declarations: [{
-                name: "rank_candidates",
-                description: "Rank and extract details from candidate resumes",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    candidates: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          candidateIndex: { type: "number", description: "Index of the candidate (0-based)" },
-                          fullName: { type: "string", description: "Candidate's full name extracted from resume" },
-                          email: { type: "string", description: "Email address" },
-                          phone: { type: "string", description: "Phone number" },
-                          location: { type: "string", description: "City, state or full address" },
-                          jobTitle: { type: "string", description: "Current or most recent job title" },
-                          yearsOfExperience: { type: "number", description: "Estimated years of experience" },
-                          matchScore: { type: "number", description: "Match score 0-100" },
-                          reasoning: { type: "string", description: "Brief explanation of the match" },
-                          strengths: { type: "array", items: { type: "string" }, description: "Key strengths matching the job" },
-                          concerns: { type: "array", items: { type: "string" }, description: "Potential concerns or gaps" }
-                        },
-                        required: ["candidateIndex", "fullName", "matchScore", "reasoning", "strengths"]
+${batch.map(c => c.summary).join('\n\n---\n\n')}`
+                }]
+              }],
+              tools: [{
+                function_declarations: [{
+                  name: "rank_candidates",
+                  description: "Rank and extract details from candidate resumes",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      candidates: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            candidateIndex: { type: "number" },
+                            fullName: { type: "string" },
+                            email: { type: "string" },
+                            phone: { type: "string" },
+                            location: { type: "string" },
+                            jobTitle: { type: "string" },
+                            yearsOfExperience: { type: "number" },
+                            matchScore: { type: "number" },
+                            reasoning: { type: "string" },
+                            strengths: { type: "array", items: { type: "string" } },
+                            concerns: { type: "array", items: { type: "string" } }
+                          },
+                          required: ["candidateIndex", "fullName", "matchScore", "reasoning", "strengths"]
+                        }
                       }
-                    }
-                  },
-                  required: ["candidates"]
+                    },
+                    required: ["candidates"]
+                  }
+                }]
+              }],
+              tool_config: {
+                function_calling_config: {
+                  mode: "ANY",
+                  allowed_function_names: ["rank_candidates"]
                 }
-              }]
-            }],
-            tool_config: {
-              function_calling_config: {
-                mode: "ANY",
-                allowed_function_names: ["rank_candidates"]
               }
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const functionCall = data.candidates?.[0]?.content?.parts?.[0]?.functionCall;
+            
+            if (functionCall?.name === 'rank_candidates') {
+              console.log(`Batch ${batchIndex + 1} processed successfully`);
+              return functionCall.args?.candidates || [];
             }
-          })
-        });
+          }
 
-        if (aiResponse.ok) {
-          console.log('Gemini API success on attempt', attempt + 1);
-          break;
-        }
-
-        lastError = await aiResponse.text();
-        
-        if (aiResponse.status === 429 || aiResponse.status === 503) {
-          const retryAfter = aiResponse.headers.get('retry-after');
-          const baseDelay = Math.pow(2, attempt + 1) * 1000;
-          const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : baseDelay;
-          
-          console.log(`Gemini API ${aiResponse.status} error, attempt ${attempt + 1}/${maxRetries}. Waiting ${waitTime}ms before retry...`);
-          
-          if (attempt < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, waitTime));
+          if (response.status === 429 && attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt + 1) * 1000));
             continue;
           }
-        }
-        
-        console.error('Gemini API error:', aiResponse.status, lastError);
-        break;
-
-      } catch (retryError) {
-        console.error('Error during attempt', attempt + 1, ':', retryError);
-        lastError = retryError instanceof Error ? retryError.message : 'Unknown error';
-        if (attempt < maxRetries - 1) {
-          const waitTime = Math.pow(2, attempt + 1) * 1000;
-          console.log(`Waiting ${waitTime}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          
+          throw new Error(`Batch ${batchIndex + 1} failed: ${response.status}`);
+        } catch (error) {
+          if (attempt === maxRetries - 1) {
+            console.error(`Batch ${batchIndex + 1} failed after ${maxRetries} attempts:`, error);
+            // Return fallback for this batch
+            return batch.map(c => ({
+              candidateIndex: c.index,
+              fullName: `Candidate ${c.index + 1}`,
+              email: null,
+              phone: null,
+              location: null,
+              jobTitle: null,
+              yearsOfExperience: null,
+              matchScore: 50,
+              reasoning: 'Processing failed',
+              strengths: [],
+              concerns: ['AI analysis unavailable']
+            }));
+          }
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt + 1) * 1000));
         }
       }
-    }
+      return [];
+    };
 
-    if (!aiResponse || !aiResponse.ok) {
-      console.error('All Gemini API retry attempts failed:', lastError);
-      
-      if (aiResponse?.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      // Return all candidates with default scores as fallback
-      console.log('Returning fallback results with default scores');
-      const fallbackMatches = profiles.map((profile, index) => ({
-        ...profile,
-        matchScore: 50,
-        reasoning: 'AI ranking temporarily unavailable - showing all candidates',
-        strengths: profile.skills?.slice(0, 3) || [],
-        concerns: []
-      }));
-      
-      return new Response(
-        JSON.stringify({ 
-          matches: fallbackMatches,
-          total: profiles.length,
-          message: `Showing ${fallbackMatches.length} candidates (AI ranking unavailable)`
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    // Process all batches in parallel
+    console.log(`Processing ${batches.length} batches in parallel...`);
+    const batchResults = await Promise.all(
+      batches.map((batch, index) => processBatch(batch, index))
+    );
 
-    const aiData = await aiResponse.json();
-    let rankedCandidates;
+    // Flatten results and sort by match score
+    const rankedCandidates = batchResults
+      .flat()
+      .sort((a: any, b: any) => (b.matchScore || 0) - (a.matchScore || 0));
     
-    try {
-      // Extract function call response
-      const functionCall = aiData.candidates?.[0]?.content?.parts?.[0]?.functionCall;
-      
-      if (!functionCall || functionCall.name !== 'rank_candidates') {
-        throw new Error('No valid function call in response');
-      }
-
-      const extractedData = functionCall.args?.candidates || [];
-      console.log(`Gemini extracted ${extractedData.length} candidates with details`);
-      
-      // Sort by match score descending - return ALL candidates
-      rankedCandidates = extractedData
-        .sort((a: any, b: any) => (b.matchScore || 0) - (a.matchScore || 0));
-        
-      console.log(`Successfully ranked ${rankedCandidates.length} candidates`);
-    } catch (e) {
-      console.error('Failed to parse Gemini ranking response:', e);
-      console.error('Full AI response:', JSON.stringify(aiData, null, 2));
-      
-      // Fallback: return ALL candidates with default scores and attempt basic extraction
-      rankedCandidates = profiles.map((profile, index) => {
-        const text = profile.resume_text || '';
-        const lines = text.split('\n').filter((l: string) => l.trim());
-        
-        return {
-          candidateIndex: index,
-          fullName: lines[0]?.substring(0, 50) || `Candidate ${index + 1}`,
-          email: text.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || 'Not found',
-          phone: text.match(/[\d\s+()-]{10,}/)?.[0] || 'Not found',
-          location: 'Not extracted',
-          jobTitle: lines[1]?.substring(0, 50) || 'Not specified',
-          yearsOfExperience: null,
-          matchScore: 50,
-          reasoning: 'AI extraction failed - showing basic info',
-          strengths: [],
-          concerns: ['AI analysis unavailable']
-        };
-      });
-    }
+    console.log(`Successfully processed ${rankedCandidates.length} candidates`);
 
     // Merge AI rankings with full profile data
     const matches = rankedCandidates.map((ranked: any) => {
