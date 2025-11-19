@@ -5,7 +5,7 @@ import { CandidateHunting } from '@/components/CandidateHunting';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Users, Upload, LogOut, Bookmark, History } from 'lucide-react';
-import talentProLogo from '@/assets/talent-pro-logo.png';
+import adiLinkLogo from '@/assets/adilink-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import Footer from '@/components/Footer';
@@ -45,45 +45,45 @@ const Index = () => {
       </div>
       
       <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10 flex-1">
-        <header className="mb-12 text-center space-y-4">
-          <div className="inline-flex items-center justify-center mb-6 relative">
-            <div className="absolute inset-0 bg-primary/20 rounded-full blur-2xl animate-pulse-glow" />
-            <img src={talentProLogo} alt="AdiLink Logo" className="h-24 w-auto relative z-10 drop-shadow-2xl" />
+        <header className="mb-12 text-center space-y-6">
+          <div className="inline-flex items-center justify-center mb-6 relative group">
+            <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse-glow group-hover:bg-primary/30 transition-all duration-500" />
+            <img src={adiLinkLogo} alt="AdiLink Logo" className="h-48 md:h-56 w-auto relative z-10 drop-shadow-2xl transform group-hover:scale-105 transition-transform duration-300" />
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold text-foreground bg-clip-text text-transparent bg-gradient-to-r from-primary via-secondary to-accent animate-fade-in">
+          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary via-secondary to-accent animate-fade-in drop-shadow-lg">
             AdiLink
           </h1>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed font-medium">
             AI-Powered Recruitment Platform - Upload resumes, store candidate data, and find the perfect match with intelligent ranking
           </p>
-          <div className="flex flex-col items-center justify-center gap-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span>Welcome, {user.email}</span>
+          <div className="flex flex-col items-center justify-center gap-5">
+            <div className="flex items-center gap-3 text-muted-foreground bg-card/60 backdrop-blur-sm px-6 py-3 rounded-full border border-border/50 shadow-[var(--shadow-card)]">
+              <span className="text-sm font-medium">Welcome, {user.email}</span>
               <Button 
                 variant="ghost" 
                 size="sm" 
                 onClick={signOut}
-                className="gap-2"
+                className="gap-2 hover:bg-destructive/10 hover:text-destructive transition-colors"
               >
                 <LogOut className="h-4 w-4" />
                 Sign Out
               </Button>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <Button
                 variant="outline"
-                size="sm"
+                size="default"
                 onClick={() => navigate('/bookmarks')}
-                className="gap-2 bg-card/50 backdrop-blur-sm hover:bg-primary/10 border-primary/30"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-primary/10 border-primary/40 hover:border-primary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <Bookmark className="h-4 w-4" />
                 My Bookmarks
               </Button>
               <Button
                 variant="outline"
-                size="sm"
+                size="default"
                 onClick={() => navigate('/history')}
-                className="gap-2 bg-card/50 backdrop-blur-sm hover:bg-primary/10 border-primary/30"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-secondary/10 border-secondary/40 hover:border-secondary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <History className="h-4 w-4" />
                 Search History
@@ -92,39 +92,41 @@ const Index = () => {
           </div>
         </header>
 
-        <Tabs defaultValue="upload" className="space-y-8">
-          <div className="flex flex-col md:flex-row items-center justify-center gap-4">
-            <TabsList className="grid w-full max-w-md grid-cols-2 h-14 bg-card/50 backdrop-blur-sm border border-primary/20 shadow-[var(--shadow-elegant)]">
+        <Tabs defaultValue="upload" className="space-y-10">
+          <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-6">
+            <TabsList className="grid w-full md:w-auto grid-cols-2 h-14 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[400px]">
               <TabsTrigger 
                 value="upload" 
-                className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
+                className="gap-2 text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
-                <Upload className="h-5 w-5 mr-2" />
+                <Upload className="h-5 w-5" />
                 Upload Resumes
               </TabsTrigger>
               <TabsTrigger 
                 value="hunt" 
-                className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
+                className="gap-2 text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-accent data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
-                <Users className="h-5 w-5 mr-2" />
+                <Users className="h-5 w-5" />
                 Find Candidates
               </TabsTrigger>
             </TabsList>
+            
             <Button
-              variant="outline"
               onClick={() => navigate('/candidates')}
-              className="h-14 px-6 gap-2 bg-card/50 backdrop-blur-sm hover:bg-primary/10 border-primary/30 shadow-[var(--shadow-elegant)]"
+              variant="outline"
+              size="lg"
+              className="w-full md:w-auto gap-3 h-14 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-base"
             >
               <Users className="h-5 w-5" />
-              All Candidates
+              View All Candidates
             </Button>
           </div>
 
-          <TabsContent value="upload" className="space-y-6">
+          <TabsContent value="upload" className="space-y-6 animate-fade-in">
             <ResumeUpload />
           </TabsContent>
 
-          <TabsContent value="hunt" className="space-y-6">
+          <TabsContent value="hunt" className="space-y-6 animate-fade-in">
             <CandidateHunting />
           </TabsContent>
         </Tabs>
