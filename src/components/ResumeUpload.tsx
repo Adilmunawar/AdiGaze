@@ -86,150 +86,168 @@ export const ResumeUpload = () => {
     setEstimatedTimeRemaining(null);
     setIsCancelled(false);
     abortControllerRef.current = new AbortController();
-    let successCount = 0;
     const startTime = Date.now();
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('No active session found');
 
-      // Process files in parallel batches of 8 for faster bulk uploads
+      // Process files in batches of 8 (4 parallel API keys × 2 resumes per batch)
       const BATCH_SIZE = 8;
       const batches: File[][] = [];
       for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
         batches.push(validFiles.slice(i, i + BATCH_SIZE));
       }
 
+      let successCount = 0;
+      let failedCount = 0;
+      let batchIndex = 0;
+      
       for (const batch of batches) {
         if (isCancelled || abortControllerRef.current?.signal.aborted) {
           break;
         }
         
-        // Process batch in parallel
-        const batchPromises = batch.map(async (file) => {
-          if (abortControllerRef.current?.signal.aborted) {
-            return { success: false, fileName: file.name, cancelled: true };
+        // Refresh session token before each batch to prevent timeout
+        try {
+          const { data: { session: refreshedSession } } = await supabase.auth.getSession();
+          if (!refreshedSession?.access_token) {
+            throw new Error('Session expired. Please log in again.');
           }
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('fileName', file.name);
+          session.access_token = refreshedSession.access_token;
+        } catch (refreshError) {
+          console.error('Session refresh error:', refreshError);
+          setProcessingLogs(prev => [...prev, {
+            timestamp: new Date().toLocaleTimeString(),
+            level: 'error',
+            message: 'Session expired. Please log in again and retry.'
+          }]);
+          setHasError(true);
+          break;
+        }
+        
+        // Create FormData with multiple files for batch processing
+        const formData = new FormData();
+        batch.forEach((file) => {
+          formData.append('files', file); // Use 'files' key for all files
+        });
 
-          try {
-            const response = await fetch(
-              'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/parse-resume',
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${session.access_token}`,
-                },
-                body: formData,
-                signal: abortControllerRef.current?.signal,
-              }
-            );
+        try {
+          console.log(`Starting batch upload for ${batch.length} files:`, batch.map(f => f.name));
+          
+          batch.forEach(file => {
+            setProcessingLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              level: 'info',
+              message: `Uploading ${file.name}...`
+            }]);
+          });
 
-            if (!response.ok || !response.body) {
-              throw new Error(`Upload failed for ${file.name}`);
+          const response = await fetch(
+            'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/parse-resume-batch',
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+              body: formData,
+              signal: abortControllerRef.current?.signal,
             }
+          );
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let fileSuccess = false;
+          console.log(`Batch response status: ${response.status}`);
 
-            let currentEvent = '';
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Batch upload failed:', errorText);
             
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.trim() || line.startsWith(':')) continue;
-                
-                // Track event type
-                if (line.startsWith('event:')) {
-                  currentEvent = line.slice(6).trim();
-                  continue;
-                }
-                
-                if (line.startsWith('data:')) {
-                  try {
-                    const data = JSON.parse(line.slice(5).trim());
-                    
-                    // Handle log events
-                    if (data.level && data.message) {
-                      setProcessingLogs(prev => [...prev, {
-                        timestamp: new Date().toLocaleTimeString(),
-                        level: data.level,
-                        message: data.message
-                      }]);
-                    }
-                    
-                    // Handle complete event
-                    if (currentEvent === 'complete' && data.success) {
-                      fileSuccess = true;
-                    }
-                    
-                    // Handle error event
-                    if (currentEvent === 'error') {
-                      setProcessingLogs(prev => [...prev, {
-                        timestamp: new Date().toLocaleTimeString(),
-                        level: 'error',
-                        message: data.message || 'Processing failed'
-                      }]);
-                    }
-                    
-                    currentEvent = ''; // Reset after processing
-                  } catch (parseError) {
-                    console.error('Failed to parse SSE data:', parseError);
-                  }
-                }
-              }
+            // Handle authentication errors specifically
+            if (response.status === 401) {
+              setProcessingLogs(prev => [...prev, {
+                timestamp: new Date().toLocaleTimeString(),
+                level: 'error',
+                message: 'Authentication expired. Please log in again and retry.'
+              }]);
+              setHasError(true);
+              break;
             }
+            
+            batch.forEach(file => {
+              setProcessingLogs(prev => [...prev, {
+                timestamp: new Date().toLocaleTimeString(),
+                level: 'error',
+                message: `Failed: ${file.name} - ${errorText || response.statusText}`
+              }]);
+            });
+            
+            setDroppedFiles(prev => prev + batch.length);
+            setProcessedFiles(prev => prev + batch.length);
+            continue;
+          }
 
-            return { success: fileSuccess, fileName: file.name };
-          } catch (error) {
+          const result = await response.json();
+          
+          if (result.success) {
+            setProcessingLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              level: 'success',
+              message: `Batch complete - ${result.processed} processed successfully`
+            }]);
+            
+            successCount += result.processed;
+            setUploadedCount(successCount);
+            
+            if (result.failed > 0 && result.failedFiles) {
+              result.failedFiles.forEach((failed: any) => {
+                setProcessingLogs(prev => [...prev, {
+                  timestamp: new Date().toLocaleTimeString(),
+                  level: 'error',
+                  message: `Failed: ${failed.fileName} - ${failed.error}`
+                }]);
+              });
+              failedCount += result.failed;
+              setDroppedFiles(failedCount);
+            }
+          } else {
+            throw new Error(result.error || 'Batch processing failed');
+          }
+
+        } catch (error) {
+          console.error('Error uploading batch:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          batch.forEach(file => {
             setProcessingLogs(prev => [...prev, {
               timestamp: new Date().toLocaleTimeString(),
               level: 'error',
-              message: `Failed: ${file.name}`
+              message: `Failed: ${file.name} - ${errorMessage}`
             }]);
-            return { success: false, fileName: file.name };
-          }
-        });
-
-        const batchResults = await Promise.all(batchPromises);
+          });
+          
+          failedCount += batch.length;
+          setDroppedFiles(failedCount);
+        }
         
-        let failedInBatch = 0;
-        let cancelledInBatch = 0;
-        batchResults.forEach(result => {
-          if (result.success) {
-            successCount++;
-          } else if (!(result as any).cancelled) {
-            failedInBatch++;
-          } else {
-            cancelledInBatch++;
-          }
-          if (!(result as any).cancelled) {
-            setProcessedFiles(prev => prev + 1);
-          }
-        });
-
-        setDroppedFiles(prev => prev + failedInBatch);
-        const currentProcessed = successCount + failedInBatch;
-        setProgress((currentProcessed / validFiles.length) * 100);
+        batchIndex++;
         
-        // Update time estimation
+        // Update progress with functional updates for real-time accuracy
+        setProcessedFiles(prev => {
+          const newProcessed = prev + batch.length;
+          setProgress((newProcessed / validFiles.length) * 100);
+          return newProcessed;
+        });
+        
+        // Update time estimation using current batch index
         const elapsedTime = Date.now() - startTime;
-        const avgTimePerFile = elapsedTime / currentProcessed;
-        const remainingFiles = validFiles.length - currentProcessed;
-        setEstimatedTimeRemaining(Math.ceil((avgTimePerFile * remainingFiles) / 1000));
+        const avgTimePerBatch = elapsedTime / batchIndex;
+        const remainingBatches = batches.length - batchIndex;
+        if (remainingBatches > 0) {
+          setEstimatedTimeRemaining(Math.ceil((avgTimePerBatch * remainingBatches) / 1000));
+        } else {
+          setEstimatedTimeRemaining(0);
+        }
       }
 
-      setUploadedCount(successCount);
       setIsComplete(true);
       setEstimatedTimeRemaining(null);
       
@@ -240,7 +258,6 @@ export const ResumeUpload = () => {
           variant: 'default',
         });
       } else {
-        const failedCount = validFiles.length - successCount;
         toast({
           title: failedCount === 0 ? 'Success!' : 'Partially Complete',
           description: failedCount === 0 

@@ -42,21 +42,31 @@ serve(async (req) => {
 
       try {
         sendEvent('log', { level: 'info', message: 'Starting candidate matching...' });
-        console.log('Starting candidate matching...');
+        console.log('=== MATCH-CANDIDATES EDGE FUNCTION STARTED ===');
 
         const supabaseClient = createClient(
           Deno.env.get('SUPABASE_URL') ?? '',
           Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-        if (!GEMINI_API_KEY) {
-          sendEvent('error', { message: 'GEMINI_API_KEY not configured' });
+        // Load all 4 API keys for parallel processing
+        const GEMINI_API_KEYS = [
+          Deno.env.get('GEMINI_API_KEY_1'),
+          Deno.env.get('GEMINI_API_KEY_2'),
+          Deno.env.get('GEMINI_API_KEY_3'),
+          Deno.env.get('GEMINI_API_KEY_4')
+        ];
+        
+        // Validate all keys are present
+        const missingKeys = GEMINI_API_KEYS.map((key, i) => key ? null : `GEMINI_API_KEY_${i + 1}`).filter(Boolean);
+        if (missingKeys.length > 0) {
+          console.error(`Missing API keys: ${missingKeys.join(', ')}`);
+          sendEvent('error', { message: `Missing API keys: ${missingKeys.join(', ')}` });
           controller.close();
           return;
         }
-
-        sendEvent('log', { level: 'info', message: 'Fetching candidate profiles...' });
+        
+        console.log(`[INIT] Loaded ${GEMINI_API_KEYS.length} API keys for parallel processing`);
 
         // Get authenticated user ID from the JWT
         const authHeader = req.headers.get('Authorization');
@@ -69,187 +79,237 @@ serve(async (req) => {
           return;
         }
 
-        // Fetch only the candidate profiles uploaded by this user
+        // Fetch all user's profiles (skip vector search for now to ensure reliability)
+        sendEvent('log', { level: 'info', message: 'Fetching all your candidates...' });
+        
         const { data: profiles, error: fetchError } = await supabaseClient
           .from('profiles')
           .select('*')
           .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(100);
+          .order('created_at', { ascending: false });
 
         if (fetchError) {
-          console.error('Fetch error:', fetchError);
-          sendEvent('error', { message: 'Failed to fetch profiles' });
+          console.error('[FETCH] Error fetching profiles:', fetchError);
+          sendEvent('error', { message: `Failed to fetch profiles: ${fetchError.message}` });
           controller.close();
           return;
         }
 
         if (!profiles || profiles.length === 0) {
+          console.log('[FETCH] No profiles found for user:', user.id);
           sendEvent('log', { level: 'info', message: 'No candidates found in database' });
           sendEvent('complete', { matches: [], message: 'No candidates found' });
           controller.close();
           return;
         }
 
-        sendEvent('log', { level: 'info', message: `Found ${profiles.length} candidates` });
-        sendEvent('progress', { current: 0, total: profiles.length });
-        console.log(`Processing ${profiles.length} candidates in batches...`);
+        console.log(`[FETCH] Successfully fetched ${profiles.length} profiles for user ${user.id}`);
+        sendEvent('log', { level: 'success', message: `Found ${profiles.length} candidates in your database` });
 
-        // Process in batches of 5 candidates with parallel processing
+        sendEvent('log', { level: 'info', message: `Analyzing ${profiles.length} candidates with AI...` });
+        sendEvent('progress', { current: 0, total: profiles.length });
+        console.log(`[PROCESSING] ${profiles.length} candidates in parallel batches`);
+
+        // PARALLEL PROCESSING: 4 batches of 5 candidates each (20 total at once)
         const BATCH_SIZE = 5;
-        const PARALLEL_BATCHES = 3; // Process 3 batches in parallel
+        const PARALLEL_BATCHES = 4;
         const allRankedCandidates: any[] = [];
         
-        // Process batches in parallel (3 at a time) for faster execution
-        const totalBatches = Math.ceil(profiles.length / BATCH_SIZE);
+        // Create batches of 5 candidates
+        const batches: any[][] = [];
+        for (let i = 0; i < profiles.length; i += BATCH_SIZE) {
+          batches.push(profiles.slice(i, i + BATCH_SIZE));
+        }
         
-        for (let batchStart = 0; batchStart < profiles.length; batchStart += BATCH_SIZE * PARALLEL_BATCHES) {
-          const parallelBatches = [];
+        console.log(`[PROCESSING] Created ${batches.length} batches of up to ${BATCH_SIZE} candidates each`);
+        sendEvent('log', { level: 'info', message: `Processing ${batches.length} batches (${BATCH_SIZE} candidates per batch)` });
+        
+        // Process batches in parallel groups of 4
+        for (let groupStart = 0; groupStart < batches.length; groupStart += PARALLEL_BATCHES) {
+          const parallelBatches = batches.slice(groupStart, groupStart + PARALLEL_BATCHES);
+          const groupNumber = Math.floor(groupStart / PARALLEL_BATCHES) + 1;
+          const totalGroups = Math.ceil(batches.length / PARALLEL_BATCHES);
+          console.log(`[PROCESSING] Starting parallel batch group ${groupNumber}/${totalGroups}: ${parallelBatches.length} batches in parallel`);
+          sendEvent('log', { level: 'info', message: `Group ${groupNumber}/${totalGroups}: Processing ${parallelBatches.length} batches in parallel` });
           
-          for (let j = 0; j < PARALLEL_BATCHES; j++) {
-            const i = batchStart + (j * BATCH_SIZE);
-            if (i >= profiles.length) break;
+          const batchPromises = parallelBatches.map(async (batch, batchIndexInGroup) => {
+            const globalBatchIndex = groupStart + batchIndexInGroup;
+            const apiKeyIndex = batchIndexInGroup; // Use batchIndexInGroup to ensure each batch in parallel group gets unique key
+            const API_KEY = GEMINI_API_KEYS[apiKeyIndex];
+            const batchNum = globalBatchIndex + 1;
+            const totalBatches = batches.length;
             
-            const batchProfiles = profiles.slice(i, Math.min(i + BATCH_SIZE, profiles.length));
-            const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+            console.log(`[BATCH ${batchNum}/${totalBatches}] Processing ${batch.length} candidates with GEMINI_API_KEY_${apiKeyIndex + 1}`);
+            sendEvent('log', { level: 'info', message: `Batch ${batchNum}/${totalBatches}: Analyzing ${batch.length} candidates with API KEY ${apiKeyIndex + 1}` });
             
-            parallelBatches.push((async () => {
-              sendEvent('log', { level: 'info', message: `Processing batch ${batchNum}/${totalBatches} (${batchProfiles.length} candidates)...` });
-              console.log(`Processing batch ${batchNum}/${totalBatches} (${batchProfiles.length} candidates)...`);
-              
-              // Prepare candidate summaries with optimized snippets
-              const candidateSummaries = batchProfiles.map((profile, index) => {
-                const text = (profile.resume_text || '').toString();
-                const snippet = text.length > 1000 ? text.slice(0, 1000) + '...' : text;
-                return {
-                  index: i + index,
-                  resume: snippet
-                };
-              });
+            // Calculate global indices for this batch
+            const startIndex = groupStart * BATCH_SIZE + batchIndexInGroup * BATCH_SIZE;
+            
+            // Prepare candidate summaries with optimized snippets
+            const candidateSummaries = batch.map((profile, localIndex) => {
+              const globalIndex = startIndex + localIndex;
+              const text = (profile.resume_text || '').toString();
+              const snippet = text.length > 800 ? text.slice(0, 800) + '...' : text;
+              return {
+                index: globalIndex,
+                resume: snippet
+              };
+            });
 
-              // Process batch with Gemini Flash
-              let batchRanked: any[] = [];
-              const maxRetries = 3;
-              
-              for (let attempt = 0; attempt < maxRetries; attempt++) {
+            // Process batch with Gemini Flash
+            let batchRanked: any[] = [];
+            const maxRetries = 2;
+            
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+              try {
+                console.log(`[BATCH ${batchNum}] Calling Gemini API (attempt ${attempt + 1}/${maxRetries})...`);
+                
+                const response = await fetch(
+                  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      contents: [{
+                        parts: [{
+                          text: `Job Description:\n${jobDescription}\n\nCandidates to analyze:\n${JSON.stringify(candidateSummaries)}\n\nFor each candidate, extract their information from their resume and evaluate their match against the job requirements.\n\nReturn ONLY valid JSON in this exact format:\n\n{"candidates": [{"candidateIndex": 0, "fullName": "Full Name from Resume", "email": "email@example.com", "phone": "+123456789", "location": "City, Country", "jobTitle": "Current Job Title", "yearsOfExperience": 5, "matchScore": 85, "reasoning": "Brief match explanation", "strengths": ["strength 1", "strength 2", "strength 3"], "concerns": ["concern 1", "concern 2"]}]}\n\nIMPORTANT RULES:\n1. Extract fullName, email, phone, location, jobTitle, yearsOfExperience from the resume text\n2. If a field is not found in resume, use null (not empty string)\n3. matchScore: 0-100 based on job fit\n4. reasoning: max 80 characters\n5. strengths and concerns: max 3 items each\n6. ALL ${batch.length} candidates MUST be included in response\n7. candidateIndex must match the index from input`
+                        }]
+                      }],
+                      generationConfig: {
+                        temperature: 0,
+                        maxOutputTokens: 8192,
+                        responseMimeType: "application/json"
+                      }
+                    })
+                  }
+                );
+
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  console.error(`[BATCH ${batchNum}] API Error ${response.status}:`, errorText);
+                  
+                  if (response.status === 429) {
+                    throw new Error('Rate limited - will retry');
+                  }
+                  throw new Error(`API error: ${response.status} - ${errorText}`);
+                }
+
+                const result = await response.json();
+                
+                console.log(`[BATCH ${batchNum}] API Response structure:`, {
+                  hasCandidates: !!result.candidates,
+                  candidatesLength: result.candidates?.length,
+                  hasContent: !!result.candidates?.[0]?.content,
+                  hasParts: !!result.candidates?.[0]?.content?.parts,
+                  partsLength: result.candidates?.[0]?.content?.parts?.length
+                });
+                
+                if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                  if (result.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+                    throw new Error('Response truncated - reducing batch size needed');
+                  }
+                  console.error(`[BATCH ${batchNum}] Invalid response structure:`, JSON.stringify(result, null, 2));
+                  throw new Error('Invalid response structure from Gemini');
+                }
+
+                let jsonText = result.candidates[0].content.parts[0].text.trim();
+                
+                // Clean JSON response
+                jsonText = jsonText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+                
+                // Validate JSON is complete
+                if (!jsonText.endsWith('}') && !jsonText.endsWith(']')) {
+                  console.error(`[BATCH ${batchNum}] JSON appears truncated. Last 100 chars:`, jsonText.slice(-100));
+                  throw new Error('JSON response appears truncated');
+                }
+                
+                let parsed;
                 try {
-                  const response = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-                    {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        contents: [{
-                          parts: [{
-                            text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(candidateSummaries)}\n\nAnalyze each candidate against the job description. Return ONLY a valid JSON object with this EXACT structure:\n{\n  "candidates": [\n    {\n      "candidateIndex": <number>,\n      "fullName": "<string>",\n      "email": "<string or null>",\n      "phone": "<string or null>",\n      "location": "<string or null>",\n      "jobTitle": "<string or null>",\n      "yearsOfExperience": <number or null>,\n      "matchScore": <number 0-100>,\n      "reasoning": "<string max 80 chars>",\n      "strengths": ["<string>", "<string>", "<string>"],\n      "concerns": ["<string>", "<string>", "<string>"]\n    }\n  ]\n}\n\nIMPORTANT: reasoning max 80 chars, max 3 items in strengths/concerns arrays.`
-                          }]
-                        }],
-                        generationConfig: {
-                          temperature: 0.3,
-                          topK: 40,
-                          topP: 0.95,
-                          maxOutputTokens: 16000,
-                        },
-                        safetySettings: [
-                          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-                        ]
-                      })
-                    }
-                  );
+                  parsed = JSON.parse(jsonText);
+                } catch (parseError) {
+                  console.error(`[BATCH ${batchNum}] JSON parse failed. First 500 chars:`, jsonText.substring(0, 500));
+                  console.error(`[BATCH ${batchNum}] Last 500 chars:`, jsonText.slice(-500));
+                  throw new Error('Failed to parse AI response as JSON');
+                }
 
-                  if (!response.ok) {
-                    const errorText = await response.text();
-                    if (response.status === 429) {
-                      throw new Error('Rate limited - will retry');
-                    }
-                    throw new Error(`API error: ${response.status} - ${errorText}`);
-                  }
+                if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
+                  console.error(`[BATCH ${batchNum}] Response missing candidates array. Parsed:`, parsed);
+                  throw new Error('Response missing candidates array');
+                }
+                
+                if (parsed.candidates.length !== batch.length) {
+                  console.warn(`[BATCH ${batchNum}] Expected ${batch.length} candidates but got ${parsed.candidates.length}`);
+                }
 
-                  const result = await response.json();
+                batchRanked = parsed.candidates.map((candidate: any) => {
+                  // Get original profile data for fallback
+                  const originalProfile = batch[candidate.candidateIndex - startIndex];
                   
-                  if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-                    if (result.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
-                      throw new Error('Response exceeded token limit - try reducing batch size or resume length');
-                    }
-                    throw new Error('Invalid response structure from Gemini');
-                  }
-
-                  let jsonText = result.candidates[0].content.parts[0].text.trim();
-                  jsonText = jsonText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-                  
-                  let parsed;
-                  try {
-                    parsed = JSON.parse(jsonText);
-                  } catch (parseError) {
-                    console.error('JSON parse failed. Raw text:', jsonText);
-                    throw new Error('Failed to parse AI response as JSON');
-                  }
-
-                  if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
-                    throw new Error('Response missing candidates array');
-                  }
-
-                  batchRanked = parsed.candidates.map((candidate: any) => ({
+                  return {
                     candidateIndex: candidate.candidateIndex,
-                    fullName: candidate.fullName || null,
-                    email: candidate.email || null,
-                    phone: candidate.phone || null,
-                    location: candidate.location || null,
-                    jobTitle: candidate.jobTitle || null,
-                    yearsOfExperience: candidate.yearsOfExperience || null,
+                    fullName: candidate.fullName || originalProfile?.full_name || 'Unknown',
+                    email: candidate.email || originalProfile?.email || null,
+                    phone: candidate.phone || originalProfile?.phone_number || null,
+                    location: candidate.location || originalProfile?.location || null,
+                    jobTitle: candidate.jobTitle || originalProfile?.job_title || null,
+                    yearsOfExperience: candidate.yearsOfExperience ?? originalProfile?.years_of_experience ?? null,
                     matchScore: candidate.matchScore || 50,
                     reasoning: candidate.reasoning || 'Analyzed',
-                    strengths: candidate.strengths || [],
-                    concerns: candidate.concerns || []
+                    strengths: (candidate.strengths || []).slice(0, 3),
+                    concerns: (candidate.concerns || []).slice(0, 3)
+                  };
+                });
+                
+                console.log(`[BATCH ${batchNum}/${totalBatches}] ✓ Successfully parsed ${batchRanked.length} candidates`);
+                sendEvent('log', { level: 'success', message: `Batch ${batchNum}/${totalBatches} complete: ${batchRanked.length} candidates analyzed` });
+                sendEvent('progress', { current: Math.min(startIndex + batch.length, profiles.length), total: profiles.length });
+                
+                break;
+                
+              } catch (error: any) {
+                console.error(`[BATCH ${batchNum}] Attempt ${attempt + 1} failed:`, error.message);
+                sendEvent('log', { level: 'error', message: `Batch ${batchNum} attempt ${attempt + 1} failed: ${error.message}` });
+                
+                if (attempt === maxRetries - 1) {
+                  console.error(`[BATCH ${batchNum}] All retries exhausted, creating fallback results`);
+                  batchRanked = candidateSummaries.map(c => ({
+                    candidateIndex: c.index,
+                    fullName: `Candidate ${c.index + 1}`,
+                    email: null,
+                    phone: null,
+                    location: null,
+                    jobTitle: null,
+                    yearsOfExperience: null,
+                    matchScore: 0,
+                    reasoning: 'Analysis failed - manual review needed',
+                    strengths: [],
+                    concerns: ['Automated analysis unavailable']
                   }));
-                  
-                  sendEvent('log', { level: 'success', message: `Successfully processed batch ${batchNum} (${batchProfiles.length} candidates)` });
-                  sendEvent('progress', { current: Math.min(i + BATCH_SIZE, profiles.length), total: profiles.length });
-                  console.log(`Successfully processed batch ${batchNum} (${batchProfiles.length} candidates)`);
-                  break;
-                  
-                } catch (error: any) {
-                  sendEvent('log', { level: 'error', message: `Batch ${batchNum} attempt ${attempt + 1} failed: ${error.message}` });
-                  console.error(`Batch ${batchNum} attempt ${attempt + 1} failed:`, error);
-                  
-                  if (attempt === maxRetries - 1) {
-                    console.log(`Creating fallback results for batch ${batchNum}`);
-                    batchRanked = candidateSummaries.map(c => ({
-                      candidateIndex: c.index,
-                      fullName: `Candidate ${c.index + 1}`,
-                      email: null,
-                      phone: null,
-                      location: null,
-                      jobTitle: null,
-                      yearsOfExperience: null,
-                      matchScore: 0,
-                      reasoning: 'Analysis failed - manual review needed',
-                      strengths: [],
-                      concerns: ['Automated analysis unavailable']
-                    }));
-                  } else {
-                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt + 1) * 1000));
-                  }
+                } else {
+                  const delay = Math.pow(2, attempt + 1) * 1000;
+                  console.log(`[BATCH ${batchNum}] Retrying after ${delay}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, delay));
                 }
               }
-              
-              return batchRanked;
-            })());
-          }
+            }
+            
+            return batchRanked;
+          });
           
-          const batchResults = await Promise.all(parallelBatches);
+          const batchResults = await Promise.all(batchPromises);
+          const processedCount = batchResults.flat().length;
+          console.log(`[PROCESSING] Parallel batch group ${groupNumber}/${totalGroups} complete. Processed ${processedCount} candidates`);
+          sendEvent('log', { level: 'success', message: `Group ${groupNumber}/${totalGroups} complete: ${processedCount} candidates processed` });
           batchResults.forEach(result => allRankedCandidates.push(...result));
         }
 
-        sendEvent('log', { level: 'info', message: `All batches processed. Total candidates: ${allRankedCandidates.length}` });
-        console.log(`All batches processed. Total candidates: ${allRankedCandidates.length}`);
+        console.log(`[PROCESSING] All batches complete. Total: ${allRankedCandidates.length} candidates`);
+        sendEvent('log', { level: 'success', message: `All batches processed: ${allRankedCandidates.length} total candidates` });
 
+        // Sort by match score
         allRankedCandidates.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
 
-        // Merge with profile data and prepare bulk database updates
+        // Merge with profile data
         const matches = allRankedCandidates.map((ranked: any) => {
           const profile = profiles[ranked.candidateIndex];
           
@@ -265,12 +325,12 @@ serve(async (req) => {
             resume_file_url: profile.resume_file_url,
             resume_text: profile.resume_text,
             created_at: profile.created_at,
-            full_name: ranked.fullName || 'Not extracted',
-            email: ranked.email || null,
-            phone_number: ranked.phone || null,
-            location: ranked.location || null,
-            job_title: ranked.jobTitle || null,
-            years_of_experience: ranked.yearsOfExperience || null,
+            full_name: ranked.fullName || profile.full_name || 'Not extracted',
+            email: ranked.email || profile.email || null,
+            phone_number: ranked.phone || profile.phone_number || null,
+            location: ranked.location || profile.location || null,
+            job_title: ranked.jobTitle || profile.job_title || null,
+            years_of_experience: ranked.yearsOfExperience || profile.years_of_experience || null,
             matchScore: isFallback ? 0 : ranked.matchScore,
             reasoning: ranked.reasoning,
             strengths: ranked.strengths || [],
@@ -282,17 +342,29 @@ serve(async (req) => {
 
         sendEvent('log', { level: 'info', message: 'Updating candidate profiles...' });
 
-        // Bulk update profiles (optimized with Promise.allSettled)
+        // Bulk update profiles
         const updatePromises = matches
           .filter(m => m.shouldUpdate)
           .map(m => {
             const updateData: any = {};
-            if (m.full_name) updateData.full_name = m.full_name;
-            if (m.email) updateData.email = m.email;
-            if (m.phone_number) updateData.phone_number = m.phone_number;
-            if (m.location) updateData.location = m.location;
-            if (m.job_title) updateData.job_title = m.job_title;
-            if (m.years_of_experience) updateData.years_of_experience = m.years_of_experience;
+            if (m.full_name && m.full_name !== profiles.find(p => p.id === m.id)?.full_name) {
+              updateData.full_name = m.full_name;
+            }
+            if (m.email && m.email !== profiles.find(p => p.id === m.id)?.email) {
+              updateData.email = m.email;
+            }
+            if (m.phone_number && m.phone_number !== profiles.find(p => p.id === m.id)?.phone_number) {
+              updateData.phone_number = m.phone_number;
+            }
+            if (m.location && m.location !== profiles.find(p => p.id === m.id)?.location) {
+              updateData.location = m.location;
+            }
+            if (m.job_title && m.job_title !== profiles.find(p => p.id === m.id)?.job_title) {
+              updateData.job_title = m.job_title;
+            }
+            if (m.years_of_experience && m.years_of_experience !== profiles.find(p => p.id === m.id)?.years_of_experience) {
+              updateData.years_of_experience = m.years_of_experience;
+            }
             
             if (Object.keys(updateData).length > 0) {
               return supabaseClient
@@ -310,8 +382,8 @@ serve(async (req) => {
         const fallbackCount = matches.filter(m => m.isFallback).length;
         const successCount = validMatches.length;
         
+        console.log(`✓ Successfully matched ${successCount} candidates, ${fallbackCount} required fallback`);
         sendEvent('log', { level: 'success', message: `Successfully matched ${successCount} candidates, ${fallbackCount} fallback` });
-        console.log(`Successfully matched ${successCount} candidates, ${fallbackCount} fallback`);
 
         sendEvent('complete', { 
           matches: validMatches,
@@ -322,8 +394,9 @@ serve(async (req) => {
         controller.close();
 
       } catch (error) {
-        console.error('Error in match-candidates function:', error);
-        sendEvent('error', { message: error instanceof Error ? error.message : 'Unknown error' });
+        console.error('═══ UNHANDLED ERROR IN MATCH-CANDIDATES ═══');
+        console.error('Error:', error);
+        sendEvent('error', { message: error instanceof Error ? error.message : 'Unknown error occurred' });
         controller.close();
       }
     }
@@ -335,6 +408,6 @@ serve(async (req) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-    }
+    },
   });
 });

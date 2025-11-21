@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.parse-resume]
 verify_jwt = true
+
+[functions.parse-resume-batch]
+verify_jwt = true

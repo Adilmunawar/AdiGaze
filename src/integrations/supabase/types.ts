@@ -134,6 +134,7 @@ export type Database = {
           created_at: string | null
           education: string | null
           email: string | null
+          embedding: string | null
           experience: string | null
           full_name: string | null
           id: string
@@ -151,6 +152,7 @@ export type Database = {
           created_at?: string | null
           education?: string | null
           email?: string | null
+          embedding?: string | null
           experience?: string | null
           full_name?: string | null
           id?: string
@@ -168,6 +170,7 @@ export type Database = {
           created_at?: string | null
           education?: string | null
           email?: string | null
+          embedding?: string | null
           experience?: string | null
           full_name?: string | null
           id?: string
@@ -188,7 +191,38 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_profiles: {
+        Args: {
+          filter_user_id: string
+          match_count: number
+          match_threshold: number
+          query_embedding: string
+        }
+        Returns: {
+          created_at: string | null
+          education: string | null
+          email: string | null
+          embedding: string | null
+          experience: string | null
+          full_name: string | null
+          id: string
+          job_title: string | null
+          location: string | null
+          phone_number: string | null
+          resume_file_url: string | null
+          resume_text: string | null
+          sector: string | null
+          skills: string[] | null
+          user_id: string | null
+          years_of_experience: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       [_ in never]: never
