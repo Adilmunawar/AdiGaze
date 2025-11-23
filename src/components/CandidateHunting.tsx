@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase } from 'lucide-react';
+import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -63,6 +63,10 @@ export const CandidateHunting = () => {
   const [processingError, setProcessingError] = useState(false);
   const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
   const [selectedJobTitles, setSelectedJobTitles] = useState<string[]>([]);
+  const [isAutoSelecting, setIsAutoSelecting] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
   
   const itemsPerPage = 10;
@@ -374,6 +378,203 @@ export const CandidateHunting = () => {
     });
   };
 
+  const cleanDuplicates = () => {
+    if (matches.length === 0) {
+      toast({
+        title: 'No Data',
+        description: 'No candidates to clean',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const uniqueMap = new Map<string, CandidateMatch>();
+    const normalizeString = (str: string | null | undefined): string => {
+      return (str || '').toLowerCase().trim().replace(/\s+/g, '');
+    };
+
+    for (const candidate of matches) {
+      const emailKey = normalizeString(candidate.email);
+      const phoneKey = normalizeString(candidate.phone_number);
+      const nameKey = normalizeString(candidate.full_name);
+      
+      // Generate a composite key based on available identifiers
+      const compositeKey = `${emailKey}|${phoneKey}|${nameKey}`;
+      
+      // Check if we've seen this candidate before
+      let isDuplicate = false;
+      let existingKey = '';
+
+      for (const [key, existing] of uniqueMap.entries()) {
+        const existingEmail = normalizeString(existing.email);
+        const existingPhone = normalizeString(existing.phone_number);
+        const existingName = normalizeString(existing.full_name);
+
+        // Consider it a duplicate if any of these match:
+        // 1. Same email (and email is not empty)
+        // 2. Same phone (and phone is not empty)
+        // 3. Same name (exact match after normalization)
+        if (
+          (emailKey && existingEmail && emailKey === existingEmail) ||
+          (phoneKey && existingPhone && phoneKey === existingPhone) ||
+          (nameKey && existingName && nameKey === existingName)
+        ) {
+          isDuplicate = true;
+          existingKey = key;
+          break;
+        }
+      }
+
+      if (isDuplicate && existingKey) {
+        const existing = uniqueMap.get(existingKey)!;
+        // Keep the one with the higher match score
+        if (candidate.matchScore > existing.matchScore) {
+          uniqueMap.set(existingKey, candidate);
+        }
+      } else {
+        // Not a duplicate, add to map
+        uniqueMap.set(compositeKey, candidate);
+      }
+    }
+
+    const cleanedMatches = Array.from(uniqueMap.values()).sort(
+      (a, b) => b.matchScore - a.matchScore
+    );
+
+    const removedCount = matches.length - cleanedMatches.length;
+
+    if (removedCount === 0) {
+      toast({
+        title: 'No Duplicates Found',
+        description: 'All candidates in the results are unique',
+      });
+    } else {
+      setMatches(cleanedMatches);
+      setCurrentPage(1);
+      toast({
+        title: 'Duplicates Removed',
+        description: `Removed ${removedCount} duplicate ${removedCount === 1 ? 'candidate' : 'candidates'}`,
+      });
+    }
+  };
+
+  const autoSelectJobTitles = async () => {
+    if (!jobDescription.trim()) {
+      toast({
+        title: 'Missing Job Description',
+        description: 'Please enter a job description first',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (availableJobTitles.length === 0) {
+      toast({
+        title: 'No Job Titles',
+        description: 'No job titles available to select from',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsAutoSelecting(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data, error } = await supabase.functions.invoke('suggest-job-titles', {
+        body: {
+          jobDescription,
+          availableTitles: availableJobTitles,
+        },
+      });
+
+      if (error) throw error;
+
+      const { suggestedTitles } = data;
+
+      if (suggestedTitles && suggestedTitles.length > 0) {
+        setSelectedJobTitles(suggestedTitles);
+        toast({
+          title: 'Auto-Selected Job Titles',
+          description: `Selected ${suggestedTitles.length} relevant ${suggestedTitles.length === 1 ? 'title' : 'titles'}`,
+        });
+      } else {
+        toast({
+          title: 'No Matches Found',
+          description: 'AI could not find relevant job titles for this description',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error auto-selecting job titles:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to auto-select job titles';
+      toast({
+        title: 'Auto-Selection Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAutoSelecting(false);
+    }
+  };
+
+  const enhanceDescription = async () => {
+    if (!jobDescription.trim()) {
+      toast({
+        title: 'Missing Job Description',
+        description: 'Please enter a job description first',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsEnhancing(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data, error } = await supabase.functions.invoke('enhance-description', {
+        body: {
+          jobDescription,
+        },
+      });
+
+      if (error) throw error;
+
+      const { enhancedDescription } = data;
+
+      if (enhancedDescription) {
+        setJobDescription(enhancedDescription);
+        toast({
+          title: 'Description Enhanced',
+          description: 'AI has improved your job description',
+        });
+      } else {
+        throw new Error('No enhanced description received');
+      }
+    } catch (error) {
+      console.error('Error enhancing description:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to enhance description';
+      toast({
+        title: 'Enhancement Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
+  const handleCancelSearch = () => {
+    setIsCancelled(true);
+    abortControllerRef.current?.abort();
+    addLog('info', 'Search cancelled by user');
+    setSearchStatus('Search cancelled');
+  };
+
   const addLog = (level: 'info' | 'error' | 'success', message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     setProcessingLogs(prev => [...prev, { timestamp, level, message }]);
@@ -414,6 +615,7 @@ export const CandidateHunting = () => {
           'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ jobDescription, candidateIds }),
+        signal: abortControllerRef.current?.signal,
       }
     );
 
@@ -568,6 +770,8 @@ export const CandidateHunting = () => {
     setShowLogsDialog(true);
     setProcessingComplete(false);
     setProcessingError(false);
+    setIsCancelled(false);
+    abortControllerRef.current = new AbortController();
 
     addLog('info', 'Booting edge functions...');
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -622,6 +826,18 @@ export const CandidateHunting = () => {
         0,
         1
       );
+
+      // Check if cancelled after matching
+      if (isCancelled || abortControllerRef.current?.signal.aborted) {
+        addLog('info', 'Search cancelled before saving results');
+        setSearchStatus('Search cancelled');
+        setProcessingComplete(true);
+        toast({
+          title: 'Search Cancelled',
+          description: 'Candidate matching was cancelled',
+        });
+        return;
+      }
 
       if (allMatches.length === 0) {
         throw new Error('No results received from matching process');
@@ -697,13 +913,25 @@ export const CandidateHunting = () => {
       });
     } catch (error) {
       console.error('Search error:', error);
-      setProcessingError(true);
-      addLog('error', error instanceof Error ? error.message : 'Unknown error occurred');
-      toast({
-        title: 'Search Failed',
-        description: error instanceof Error ? error.message : 'Failed to search candidates',
-        variant: 'destructive',
-      });
+      
+      // Check if it was an abort error
+      if (error instanceof Error && error.name === 'AbortError') {
+        addLog('info', 'Search cancelled by user');
+        setSearchStatus('Search cancelled');
+        setProcessingComplete(true);
+        toast({
+          title: 'Search Cancelled',
+          description: 'Candidate matching was cancelled',
+        });
+      } else {
+        setProcessingError(true);
+        addLog('error', error instanceof Error ? error.message : 'Unknown error occurred');
+        toast({
+          title: 'Search Failed',
+          description: error instanceof Error ? error.message : 'Failed to search candidates',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setSearching(false);
     }
@@ -711,25 +939,37 @@ export const CandidateHunting = () => {
 
   return (
     <div className="space-y-6">
-      <Card className="p-6 bg-gradient-to-br from-card/90 to-secondary/10 backdrop-blur-sm border border-primary/20 shadow-[var(--shadow-elegant)]">
+      <Card className="p-4 bg-gradient-to-br from-card/90 to-secondary/10 backdrop-blur-sm border border-primary/20 shadow-[var(--shadow-elegant)]">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-gradient-to-br from-secondary/20 to-primary/20 rounded-lg ring-2 ring-secondary/30 shadow-[var(--shadow-glow)]">
               <Sparkles className="h-6 w-6 text-secondary animate-pulse" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-foreground">AI-Powered Candidate Matching</h3>
+              <h3 className="text-lg font-bold text-foreground">AI-Powered Candidate Matching</h3>
               <p className="text-sm text-muted-foreground">Describe your ideal candidate and let AI find the best matches</p>
             </div>
           </div>
 
           {availableJobTitles.length > 0 && (
             <div className="space-y-3 p-4 bg-secondary/5 rounded-lg border border-primary/10">
-              <div className="flex items-center gap-2">
-                <Briefcase className="h-5 w-5 text-primary" />
-                <h4 className="font-semibold text-foreground">Filter by Job Title (Optional)</h4>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="h-5 w-5 text-primary" />
+                  <h4 className="font-semibold text-foreground">Filter by Job Title (Optional)</h4>
+                </div>
+                <Button
+                  onClick={autoSelectJobTitles}
+                  disabled={isAutoSelecting || !jobDescription.trim() || availableJobTitles.length === 0}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2 bg-gradient-to-r from-primary/10 to-primary/20 hover:from-primary/20 hover:to-primary/30 border-primary/30"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {isAutoSelecting ? 'Auto-Selecting...' : 'Auto-Select'}
+                </Button>
               </div>
-              <p className="text-sm text-muted-foreground">Select specific job titles to reduce processing time and improve relevance</p>
+              <p className="text-sm text-muted-foreground">Select specific job titles to reduce processing time and improve relevance, or use Auto-Select to let AI choose</p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[200px] overflow-y-auto">
                 {availableJobTitles.map((title) => (
                   <div key={title} className="flex items-center space-x-2">
@@ -778,17 +1018,32 @@ export const CandidateHunting = () => {
             </div>
           )}
 
-          <Textarea
-            placeholder="Enter job description including required skills, experience, qualifications, and any specific requirements..."
-            value={jobDescription}
-            onChange={(e) => setJobDescription(e.target.value)}
-            className="min-h-[150px] resize-none text-base"
-          />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Job Description</Label>
+              <Button
+                onClick={enhanceDescription}
+                disabled={isEnhancing || !jobDescription.trim()}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2 bg-gradient-to-r from-secondary/10 to-accent/10 hover:from-secondary/20 hover:to-accent/20 border-secondary/30"
+              >
+                <Sparkles className="h-3 w-3" />
+                {isEnhancing ? 'Enhancing...' : 'Enhance with AI'}
+              </Button>
+            </div>
+            <Textarea
+              placeholder="Enter job description including required skills, experience, qualifications, and any specific requirements..."
+              value={jobDescription}
+              onChange={(e) => setJobDescription(e.target.value)}
+              className="min-h-[100px] resize-none text-sm"
+            />
+          </div>
 
           <Button
             onClick={handleSearch}
             disabled={searching || !jobDescription.trim()}
-            className="w-full h-12 text-lg font-semibold bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-[var(--shadow-elegant)] hover:shadow-[var(--shadow-premium)] hover:scale-105 transition-all duration-300"
+            className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-[var(--shadow-elegant)] hover:shadow-[var(--shadow-premium)] hover:scale-105 transition-all duration-300"
           >
             {searching ? (
               <>
@@ -833,7 +1088,7 @@ export const CandidateHunting = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-4">
-                <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Award className="h-6 w-6 text-primary" />
                   Ranked Candidates ({filteredMatches.length} {showBookmarkedOnly ? 'bookmarked' : `of ${totalCandidates}`})
                 </h3>
@@ -851,6 +1106,14 @@ export const CandidateHunting = () => {
                 </Button>
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  onClick={cleanDuplicates}
+                  variant="outline"
+                  className="flex items-center gap-2 bg-gradient-to-r from-accent/10 to-accent/20 hover:from-accent/20 hover:to-accent/30 border-accent/30"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clean Duplicates
+                </Button>
                 <Button
                   onClick={exportToCSV}
                   variant="outline"
@@ -874,14 +1137,14 @@ export const CandidateHunting = () => {
               {currentMatches.map((candidate, index) => {
                 const globalIndex = startIndex + index;
                 return (
-                <Card key={candidate.id} className="p-6 hover:shadow-[var(--shadow-premium)] hover:scale-[1.02] transition-all duration-300 bg-card/90 backdrop-blur-sm border border-primary/20 animate-fade-in">
-                  <div className="flex items-start justify-between mb-4">
+                <Card key={candidate.id} className="p-4 hover:shadow-[var(--shadow-premium)] hover:scale-[1.02] transition-all duration-300 bg-card/90 backdrop-blur-sm border border-primary/20 animate-fade-in">
+                  <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center h-12 w-12 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-foreground font-bold text-xl shadow-lg">
+                      <div className="flex items-center justify-center h-10 w-10 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-foreground font-bold text-lg shadow-lg">
                         #{globalIndex + 1}
                       </div>
                     <div>
-                      <h4 className="text-xl font-bold text-foreground">{candidate.full_name}</h4>
+                      <h4 className="text-lg font-bold text-foreground">{candidate.full_name}</h4>
                       {candidate.job_title && (
                         <p className="text-sm text-muted-foreground font-medium">{candidate.job_title}</p>
                       )}
@@ -893,7 +1156,7 @@ export const CandidateHunting = () => {
                   <div className="flex items-center gap-3">
                     <Badge 
                       variant={candidate.matchScore >= 80 ? "default" : candidate.matchScore >= 60 ? "secondary" : "outline"}
-                      className="text-lg px-4 py-2 font-bold"
+                      className="text-sm px-3 py-1 font-bold"
                     >
                       {candidate.matchScore}% Match
                     </Badge>
@@ -917,7 +1180,7 @@ export const CandidateHunting = () => {
 
                 {/* Contact Information - Highlighted Section */}
                 {(candidate.email || candidate.phone_number || candidate.location) && (
-                  <div className="mb-4 p-4 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-lg border-2 border-primary/20">
+                  <div className="mb-3 p-3 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-lg border-2 border-primary/20">
                     <p className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
                       📇 Contact Information
                     </p>
@@ -948,7 +1211,7 @@ export const CandidateHunting = () => {
                   </div>
                 )}
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
                     <p className="text-sm font-bold text-muted-foreground mb-2">Why This Match?</p>
                     <p className="text-sm bg-muted/50 p-3 rounded-lg leading-relaxed">{candidate.reasoning}</p>
@@ -959,7 +1222,7 @@ export const CandidateHunting = () => {
                       <p className="text-sm font-bold text-muted-foreground mb-2">Key Strengths</p>
                       <div className="flex flex-wrap gap-2">
                         {candidate.strengths.map((strength, i) => (
-                          <Badge key={i} variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 font-medium">
+                          <Badge key={i} variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 font-medium text-xs px-2 py-0.5">
                             ✓ {strength}
                           </Badge>
                         ))}
@@ -972,7 +1235,7 @@ export const CandidateHunting = () => {
                       <p className="text-sm font-bold text-muted-foreground mb-2">Potential Concerns</p>
                       <div className="flex flex-wrap gap-2">
                         {candidate.concerns.map((concern, i) => (
-                          <Badge key={i} variant="outline" className="border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-300 font-medium">
+                          <Badge key={i} variant="outline" className="border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-300 font-medium text-xs px-2 py-0.5">
                             ⚠ {concern}
                           </Badge>
                         ))}
@@ -1085,6 +1348,7 @@ export const CandidateHunting = () => {
           setProcessingComplete(false);
           setProcessingError(false);
         }}
+        onCancel={searching ? handleCancelSearch : undefined}
       />
     </div>
   );

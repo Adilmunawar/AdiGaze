@@ -91,20 +91,20 @@ const Index = () => {
       </div>
       
       <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10 flex-1">
-        <header className="mb-12 text-center space-y-6">
+        <header className="mb-8 text-center space-y-4">
           <div className="inline-flex items-center justify-center mb-6 relative group">
             <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse-glow group-hover:bg-primary/30 transition-all duration-500" />
-            <img src={adiGazeLogo} alt="AdiGaze Logo" className="h-48 md:h-56 w-auto relative z-10 drop-shadow-2xl transform group-hover:scale-105 transition-transform duration-300" />
+            <img src={adiGazeLogo} alt="AdiGaze Logo" className="h-32 md:h-40 w-auto relative z-10 drop-shadow-2xl transform group-hover:scale-105 transition-transform duration-300" />
           </div>
-          <div className="flex flex-col items-center justify-center gap-5">
-            <div className="flex items-center gap-4 text-muted-foreground bg-card/60 backdrop-blur-sm px-6 py-3 rounded-full border border-border/50 shadow-[var(--shadow-card)]">
-              <Avatar className="h-10 w-10 border-2 border-primary/20">
+          <div className="flex flex-col items-center justify-center gap-3">
+            <div className="flex items-center gap-4 text-muted-foreground bg-card/60 backdrop-blur-sm px-5 py-2 rounded-full border border-border/50 shadow-[var(--shadow-card)]">
+              <Avatar className="h-8 w-8 border-2 border-primary/20">
                 <AvatarImage src={avatarUrl} alt={userName} />
                 <AvatarFallback>
                   {userName?.split(' ').map(n => n[0]).join('') || user.email?.[0].toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <span className="text-sm font-medium">Welcome, {userName || user.email}</span>
+              <span className="text-xs font-medium">Welcome, {userName || user.email}</span>
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -149,7 +149,7 @@ const Index = () => {
 
         <Tabs defaultValue="upload" className="space-y-10">
           <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-6">
-            <TabsList className="grid w-full md:w-auto grid-cols-2 h-14 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[400px]">
+            <TabsList className="grid w-full md:w-auto grid-cols-2 h-11 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[400px]">
               <TabsTrigger 
                 value="upload" 
                 className="gap-2 text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
@@ -170,7 +170,7 @@ const Index = () => {
               onClick={() => navigate('/candidates')}
               variant="outline"
               size="lg"
-              className="w-full md:w-auto gap-3 h-14 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-base"
+              className="w-full md:w-auto gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
             >
               <Users className="h-5 w-5" />
               View All Candidates

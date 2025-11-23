@@ -99,10 +99,10 @@ const Auth = () => {
       
       <div className="flex-1 flex items-center justify-center p-4 relative z-10">
         <div className="w-full max-w-md animate-fade-in">
-        <div className="text-center mb-10">
+        <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center relative">
             <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse-glow" />
-            <img src={adiGazeLogo} alt="AdiGaze Logo" className="h-44 md:h-52 w-auto relative z-10 drop-shadow-2xl" />
+            <img src={adiGazeLogo} alt="AdiGaze Logo" className="h-32 md:h-40 w-auto relative z-10 drop-shadow-2xl" />
           </div>
         </div>
 
@@ -120,9 +120,9 @@ const Auth = () => {
             </CardHeader>
 
             <form onSubmit={handleSubmit}>
-              <CardContent className="space-y-4">
-                <TabsContent value="login" className="space-y-4 mt-0">
-                  <div className="space-y-2 animate-slide-in-left">
+              <CardContent className="space-y-3">
+                <TabsContent value="login" className="space-y-3 mt-0">
+                  <div className="space-y-1.5 animate-slide-in-left">
                     <Label htmlFor="login-email">Email</Label>
                     <Input
                       id="login-email"
@@ -133,7 +133,7 @@ const Auth = () => {
                       required
                     />
                   </div>
-                  <div className="space-y-2 animate-slide-in-left" style={{ animationDelay: '0.1s' }}>
+                  <div className="space-y-1.5 animate-slide-in-left" style={{ animationDelay: '0.1s' }}>
                     <Label htmlFor="login-password">Password</Label>
                     <Input
                       id="login-password"
@@ -146,8 +146,8 @@ const Auth = () => {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="signup" className="space-y-4 mt-0">
-                  <div className="space-y-2 animate-slide-in-right">
+                <TabsContent value="signup" className="space-y-3 mt-0">
+                  <div className="space-y-1.5 animate-slide-in-right">
                     <Label htmlFor="signup-name">Full Name</Label>
                     <Input
                       id="signup-name"
@@ -158,7 +158,7 @@ const Auth = () => {
                       required={!isLogin}
                     />
                   </div>
-                  <div className="space-y-2 animate-slide-in-right" style={{ animationDelay: '0.1s' }}>
+                  <div className="space-y-1.5 animate-slide-in-right" style={{ animationDelay: '0.1s' }}>
                     <Label htmlFor="signup-email">Email</Label>
                     <Input
                       id="signup-email"
@@ -169,7 +169,7 @@ const Auth = () => {
                       required
                     />
                   </div>
-                  <div className="space-y-2 animate-slide-in-right" style={{ animationDelay: '0.2s' }}>
+                  <div className="space-y-1.5 animate-slide-in-right" style={{ animationDelay: '0.2s' }}>
                     <Label htmlFor="signup-password">Password</Label>
                     <Input
                       id="signup-password"
@@ -183,10 +183,10 @@ const Auth = () => {
                 </TabsContent>
               </CardContent>
 
-              <CardFooter className="flex flex-col gap-4">
+              <CardFooter className="flex flex-col gap-3">
                 <Button 
                   type="submit" 
-                  className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
+                  className="w-full h-10 bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
                   disabled={isSubmitting || isGoogleLoading}
                 >
                   {isSubmitting ? (
@@ -211,7 +211,7 @@ const Auth = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full gap-2 border-border/50 hover:border-primary/50 hover:bg-accent/50"
+                  className="w-full h-10 gap-2 border-border/50 hover:border-primary/50 hover:bg-accent/50"
                   onClick={handleGoogleSignIn}
                   disabled={isSubmitting || isGoogleLoading}
                 >
@@ -249,22 +249,22 @@ const Auth = () => {
           </Tabs>
         </Card>
 
-        <p className="text-center text-sm text-muted-foreground mt-4">
+        <p className="text-center text-xs text-muted-foreground mt-3">
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
 
         {/* Supporters Section */}
-        <Card className="mt-8 shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-center justify-center">
-              <Heart className="h-5 w-5 text-primary fill-primary" />
+        <Card className="mt-6 shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-center justify-center text-base">
+              <Heart className="h-4 w-4 text-primary fill-primary" />
               Supporting Adil Munawar&apos;s Vision
             </CardTitle>
-            <CardDescription className="text-center">
+            <CardDescription className="text-center text-xs">
               Dedicated supporters making AdiGaze possible
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             <Carousel
               opts={{
                 align: "start",
@@ -278,30 +278,30 @@ const Auth = () => {
               <CarouselContent>
                 {supporters.map((supporter, index) => (
                   <CarouselItem key={index}>
-                    <div className="flex flex-col items-center space-y-4 p-4">
-                      <Avatar className="h-24 w-24 border-2 border-primary/20">
+                    <div className="flex flex-col items-center space-y-3 p-3">
+                      <Avatar className="h-20 w-20 border-2 border-primary/20">
                         <AvatarImage src={supporter.image} alt={supporter.name} />
                         <AvatarFallback>{supporter.initials}</AvatarFallback>
                       </Avatar>
-                      <div className="text-center space-y-2">
-                        <h3 className="font-semibold text-lg">{supporter.name}</h3>
-                        <p className="text-sm text-muted-foreground">
+                      <div className="text-center space-y-1.5">
+                        <h3 className="font-semibold text-base">{supporter.name}</h3>
+                        <p className="text-xs text-muted-foreground">
                           {supporter.role}<br />
                           {supporter.position}
                         </p>
-                        <p className="text-sm italic text-foreground/80 max-w-md">
+                        <p className="text-xs italic text-foreground/80 max-w-md">
                           &quot;{supporter.testimonial}&quot;
                         </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-[10px] text-muted-foreground">
                           Support: Not disclosed
                         </p>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="mt-2"
+                          className="mt-1.5 h-8 text-xs"
                           onClick={() => window.open(supporter.linkedin, '_blank')}
                         >
-                          <Linkedin className="h-4 w-4 mr-2" />
+                          <Linkedin className="h-3 w-3 mr-1.5" />
                           View LinkedIn Profile
                         </Button>
                       </div>

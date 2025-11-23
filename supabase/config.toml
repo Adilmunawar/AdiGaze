@@ -8,3 +8,9 @@ verify_jwt = true
 
 [functions.parse-resume-batch]
 verify_jwt = true
+
+[functions.suggest-job-titles]
+verify_jwt = true
+
+[functions.enhance-description]
+verify_jwt = true

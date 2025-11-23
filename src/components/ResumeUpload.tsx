@@ -19,6 +19,7 @@ export const ResumeUpload = () => {
   const [droppedFiles, setDroppedFiles] = useState(0);
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
   const [isCancelled, setIsCancelled] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -32,11 +33,7 @@ export const ResumeUpload = () => {
     }]);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    // Pre-validate files
+  const processFiles = async (files: FileList | File[]) => {
     const filesArray = Array.from(files);
     const validFiles: File[] = [];
     const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -266,7 +263,6 @@ export const ResumeUpload = () => {
           variant: failedCount === 0 ? 'default' : 'destructive',
         });
       }
-      event.target.value = '';
     } catch (error) {
       setHasError(true);
       toast({
@@ -279,20 +275,73 @@ export const ResumeUpload = () => {
     }
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    await processFiles(files);
+    const target = event.target as HTMLInputElement;
+    target.value = '';
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (uploading) return;
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await processFiles(files);
+    }
+  };
+
   return (
-    <Card className="p-8 bg-gradient-to-br from-card/90 to-muted/20 backdrop-blur-sm border-2 border-dashed border-primary/30 hover:border-primary/60 hover:shadow-[var(--shadow-premium)] transition-all duration-300">
+    <Card 
+      className={`p-6 bg-gradient-to-br from-card/90 to-muted/20 backdrop-blur-sm border-2 border-dashed transition-all duration-300 ${
+        isDragging 
+          ? 'border-primary bg-primary/10 shadow-[var(--shadow-premium)] scale-[1.02]' 
+          : 'border-primary/30 hover:border-primary/60 hover:shadow-[var(--shadow-premium)]'
+      }`}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <div className="flex flex-col items-center justify-center space-y-6">
         <div className="relative">
           <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse-glow" />
           <div className="relative p-6 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full ring-2 ring-primary/30 shadow-[var(--shadow-glow)]">
-            <Upload className="h-16 w-16 text-primary animate-pulse" />
+            <Upload className="h-12 w-12 text-primary animate-pulse" />
           </div>
         </div>
 
         <div className="text-center space-y-2">
-          <h3 className="text-2xl font-bold text-foreground">Upload Resumes</h3>
+          <h3 className="text-xl font-bold text-foreground">
+            {isDragging ? 'Drop Files Here' : 'Upload Resumes'}
+          </h3>
           <p className="text-muted-foreground max-w-md">
-            Upload candidate resumes in PDF or text format. Our AI will extract and store all relevant information.
+            {isDragging 
+              ? 'Release to upload your resume files' 
+              : 'Drag & drop resume files here or click to browse. PDF, TXT, DOC, or DOCX formats accepted.'
+            }
           </p>
         </div>
 
@@ -300,7 +349,7 @@ export const ResumeUpload = () => {
           <label htmlFor="resume-upload" className="w-full">
             <Button
               disabled={uploading}
-              className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-[var(--shadow-elegant)] hover:shadow-[var(--shadow-premium)] hover:scale-105 transition-all duration-300"
+              className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-[var(--shadow-elegant)] hover:shadow-[var(--shadow-premium)] hover:scale-105 transition-all duration-300"
               asChild
             >
               <span className="flex items-center">
