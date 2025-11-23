@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ResumeUpload } from '@/components/ResumeUpload';
 import { CandidateHunting } from '@/components/CandidateHunting';
+import { ApiUsageStats } from '@/components/ApiUsageStats';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Users, Upload, LogOut, Bookmark, History, Settings } from 'lucide-react';
+import { Users, Upload, LogOut, Bookmark, History, Settings, Activity } from 'lucide-react';
 import adiGazeLogo from '@/assets/adigaze-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
@@ -149,20 +150,27 @@ const Index = () => {
 
         <Tabs defaultValue="upload" className="space-y-10">
           <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-6">
-            <TabsList className="grid w-full md:w-auto grid-cols-2 h-11 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[400px]">
+            <TabsList className="grid w-full md:w-auto grid-cols-3 h-11 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[600px]">
               <TabsTrigger 
                 value="upload" 
-                className="gap-2 text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
-                <Upload className="h-5 w-5" />
+                <Upload className="h-4 w-4" />
                 Upload Resumes
               </TabsTrigger>
               <TabsTrigger 
                 value="hunt" 
-                className="gap-2 text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-accent data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-accent data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
-                <Users className="h-5 w-5" />
+                <Users className="h-4 w-4" />
                 Find Candidates
+              </TabsTrigger>
+              <TabsTrigger 
+                value="stats" 
+                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-accent data-[state=active]:to-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
+              >
+                <Activity className="h-4 w-4" />
+                Live Stats
               </TabsTrigger>
             </TabsList>
             
@@ -183,6 +191,10 @@ const Index = () => {
 
           <TabsContent value="hunt" className="space-y-6 animate-fade-in">
             <CandidateHunting />
+          </TabsContent>
+
+          <TabsContent value="stats" className="space-y-6 animate-fade-in">
+            <ApiUsageStats />
           </TabsContent>
         </Tabs>
       </div>
