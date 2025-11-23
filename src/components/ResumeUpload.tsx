@@ -92,8 +92,8 @@ export const ResumeUpload = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('No active session found');
 
-      // Process files in batches of 8 (4 parallel API keys × 2 resumes per batch)
-      const BATCH_SIZE = 8;
+      // Process files in batches of 10 (5 parallel API keys × 2 resumes per batch)
+      const BATCH_SIZE = 10;
       const batches: File[][] = [];
       for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
         batches.push(validFiles.slice(i, i + BATCH_SIZE));

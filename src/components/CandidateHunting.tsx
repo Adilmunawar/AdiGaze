@@ -33,6 +33,12 @@ interface CandidateMatch {
   concerns: string[];
 }
 
+interface MatchChunkResult {
+  matches: CandidateMatch[];
+  processed: number;
+  totalInChunk: number;
+}
+
 export const CandidateHunting = () => {
   const [searchParams] = useSearchParams();
   const [jobDescription, setJobDescription] = useState('');
@@ -348,6 +354,126 @@ export const CandidateHunting = () => {
     setProcessingLogs(prev => [...prev, { timestamp, level, message }]);
   };
 
+  const runMatchingChunk = async (
+    accessToken: string,
+    candidateIds: string[],
+    batchIndex: number,
+    totalBatches: number
+  ): Promise<MatchChunkResult> => {
+    addLog('info', `Starting batch ${batchIndex + 1}/${totalBatches} with ${candidateIds.length} candidates...`);
+    setSearchStatus(`Processing batch ${batchIndex + 1} of ${totalBatches}...`);
+
+    const response = await fetch(
+      'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/match-candidates',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ jobDescription, candidateIds }),
+      }
+    );
+
+    if (!response.ok || !response.body) {
+      throw new Error('Failed to start processing');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalData: any = null;
+    let currentEvent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim() || line.startsWith(':')) continue;
+
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+          continue;
+        }
+
+        if (line.startsWith('data:')) {
+          const data = JSON.parse(line.slice(5).trim());
+
+          if (currentEvent === 'complete' && data.matches) {
+            console.log('[SSE] Received complete event with', data.matches.length, 'matches for batch', batchIndex + 1);
+            finalData = data;
+            currentEvent = '';
+            continue;
+          }
+
+          if (currentEvent === 'error') {
+            console.error('[SSE] Error event:', data.message);
+            throw new Error(data.message || 'Processing failed');
+          }
+
+          if (currentEvent) {
+            currentEvent = '';
+          }
+
+          if (data.level && data.message) {
+            const message: string = data.message;
+
+            if (
+              message.includes('API KEY') ||
+              message.includes('API key') ||
+              message.includes('GEMINI_API_KEY') ||
+              message.includes('API Response structure') ||
+              message.includes('Calling Gemini API') ||
+              message.includes('attempt') ||
+              message.match(/Batch \d+\/\d+: Analyzing/i) ||
+              (message.includes('Analyzing') && message.includes('candidates with'))
+            ) {
+              continue;
+            }
+
+            if (message.includes('Created') && message.includes('batches')) {
+              continue;
+            }
+
+            addLog(data.level, message);
+            if (!message.toLowerCase().includes('complete')) {
+              setSearchStatus(message);
+            }
+          }
+
+          if (data.message && !data.level) {
+            if (data.message.includes('error') || data.message.includes('failed')) {
+              throw new Error(data.message);
+            }
+          }
+        }
+      }
+    }
+
+    console.log('[SSE] Batch stream ended. finalData:', finalData ? 'present' : 'missing');
+
+    if (!finalData || !finalData.matches) {
+      throw new Error('No results received from matching process');
+    }
+
+    const matches: CandidateMatch[] = finalData.matches;
+    const totalInChunk = finalData.total || matches.length;
+    const processed = finalData.processed || matches.length;
+
+    if (finalData.partial) {
+      addLog('info', `Batch ${batchIndex + 1}/${totalBatches}: analyzed ${processed} of ${totalInChunk} candidates (partial due to system limits).`);
+    } else {
+      addLog('success', `Batch ${batchIndex + 1}/${totalBatches} complete: ${matches.length} candidates analyzed.`);
+    }
+
+    return { matches, processed, totalInChunk };
+  };
+
   const handleSearch = async () => {
     if (!jobDescription.trim()) {
       toast({
@@ -366,7 +492,7 @@ export const CandidateHunting = () => {
     setShowLogsDialog(true);
     setProcessingComplete(false);
     setProcessingError(false);
-    
+
     addLog('info', 'Booting edge functions...');
     await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -377,176 +503,78 @@ export const CandidateHunting = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('No active session found');
 
-      addLog('info', 'Starting candidate matching process...');
-      setSearchStatus('Starting candidate matching...');
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
       addLog('info', 'Fetching candidates from database...');
       setSearchStatus('Fetching candidates...');
 
-      const response = await fetch(
-        'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/match-candidates',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ jobDescription }),
-        }
-      );
+      const { data: profileRows, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
-      if (!response.ok || !response.body) {
-        throw new Error('Failed to start processing');
+      if (profilesError) throw profilesError;
+
+      if (!profileRows || profileRows.length === 0) {
+        addLog('info', 'No candidates found in database');
+        setSearchStatus('No candidates found');
+        setProcessingComplete(true);
+        setSearching(false);
+        toast({
+          title: 'No Candidates Found',
+          description: 'Please upload resumes before running a search.',
+        });
+        return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalData: any = null;
-      let totalCandidatesFound = 0;
-      let processedCount = 0;
+      const totalCandidatesFound = profileRows.length;
+      addLog('success', `Found ${totalCandidatesFound} candidates in your database`);
+      setSearchStatus(`Analyzing ${totalCandidatesFound} candidates...`);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim() || line.startsWith(':')) continue;
-          
-          if (line.startsWith('data:')) {
-            const data = JSON.parse(line.slice(5).trim());
-            
-            // Handle different types of log messages
-            if (data.level && data.message) {
-              const message = data.message;
-              
-              // Hide all API key and batch-specific technical messages
-              if (message.includes('API KEY') || 
-                  message.includes('API key') ||
-                  message.includes('GEMINI_API_KEY') ||
-                  message.includes('API Response structure') ||
-                  message.includes('Calling Gemini API') ||
-                  message.includes('attempt') ||
-                  message.match(/Batch \d+\/\d+: Analyzing/i) ||
-                  message.includes('Analyzing') && message.includes('candidates with')) {
-                continue;
-              }
-              
-              // Detect when candidates are found
-              if (message.includes('Found') && message.includes('candidates in your database')) {
-                const count = message.match(/\d+/)?.[0];
-                if (count) {
-                  totalCandidatesFound = parseInt(count);
-                  addLog('success', message);
-                  addLog('info', `Analyzing ${count} candidates...`);
-                  setSearchStatus(`Analyzing ${count} candidates...`);
-                }
-                continue;
-              }
-              
-              // Track batch completion with cumulative counts
-              if (message.match(/Batch \d+\/\d+ complete:/i)) {
-                const countMatch = message.match(/(\d+) candidates/);
-                if (countMatch) {
-                  const batchSize = parseInt(countMatch[1]);
-                  processedCount += batchSize;
-                  const percentage = Math.round((processedCount / totalCandidatesFound) * 100);
-                  addLog('success', `Processed ${processedCount} of ${totalCandidatesFound} candidates (${percentage}%)`);
-                  setSearchStatus(`Processing: ${processedCount}/${totalCandidatesFound} candidates analyzed`);
-                  setSearchProgress(percentage);
-                }
-                continue;
-              }
-              
-              // Show group processing info
-              if (message.includes('Group') && message.includes('Processing')) {
-                const groupMatch = message.match(/Group (\d+)\/(\d+)/);
-                if (groupMatch) {
-                  addLog('info', `Processing group ${groupMatch[1]} of ${groupMatch[2]}`);
-                  setSearchStatus(`Processing group ${groupMatch[1]} of ${groupMatch[2]}`);
-                }
-                continue;
-              }
-              
-              // Simplify group completion messages
-              if (message.includes('Group') && message.includes('complete')) {
-                const processedMatch = message.match(/(\d+) candidates processed/);
-                if (processedMatch) {
-                  addLog('success', `Group completed: ${processedMatch[1]} candidates processed`);
-                }
-                continue;
-              }
-              
-              // Show total completion
-              if (message.includes('All batches processed')) {
-                const countMatch = message.match(/(\d+) total/);
-                if (countMatch) {
-                  addLog('success', `Analysis complete: ${countMatch[1]} candidates processed`);
-                  setSearchStatus('Finalizing results...');
-                  setSearchProgress(100);
-                }
-                continue;
-              }
-              
-              // Hide processing batches messages
-              if (message.includes('Processing') && message.includes('batches') && message.includes('per batch')) {
-                continue;
-              }
-              
-              // Show other important messages without [PROCESSING] or [BATCH] prefixes
-              if (!message.includes('[PROCESSING]') && !message.includes('[BATCH') && !message.includes('Created')) {
-                addLog(data.level, message);
-                if (!message.includes('complete')) {
-                  setSearchStatus(message);
-                }
-              }
-            }
-            
-            // Handle progress updates from backend
-            if (data.current !== undefined && data.total !== undefined) {
-              const backendProgress = Math.round((data.current / data.total) * 100);
-              // Only update if it's higher than current progress to prevent jumps
-              setSearchProgress(prev => Math.max(prev, backendProgress));
-            }
-            
-            if (data.matches) {
-              finalData = data;
-            }
-            
-            if (data.message && !data.level) {
-              if (data.message.includes('error') || data.message.includes('failed')) {
-                throw new Error(data.message);
-              }
-            }
-          }
-        }
+      const CHUNK_SIZE = 20;
+      const candidateIdChunks: string[][] = [];
+      for (let i = 0; i < profileRows.length; i += CHUNK_SIZE) {
+        candidateIdChunks.push(profileRows.slice(i, i + CHUNK_SIZE).map((p) => p.id));
       }
 
-      if (!finalData || !finalData.matches) {
-        throw new Error('No results received');
+      let allMatches: CandidateMatch[] = [];
+      let processedSoFar = 0;
+
+      for (let i = 0; i < candidateIdChunks.length; i++) {
+        const chunkIds = candidateIdChunks[i];
+
+        const { matches: chunkMatches, processed } = await runMatchingChunk(
+          session.access_token,
+          chunkIds,
+          i,
+          candidateIdChunks.length
+        );
+
+        allMatches = allMatches.concat(chunkMatches);
+        processedSoFar += processed;
+
+        const clampedProcessed = Math.min(processedSoFar, totalCandidatesFound);
+        const progress = Math.round((clampedProcessed / totalCandidatesFound) * 100);
+        setSearchProgress(progress);
+        setSearchStatus(`Analyzed ${clampedProcessed} of ${totalCandidatesFound} candidates...`);
       }
 
-      const matches = finalData.matches;
-      const total = finalData.total || 0;
+      if (allMatches.length === 0) {
+        throw new Error('No results received from matching process');
+      }
 
-      addLog('success', `Successfully matched ${matches.length} candidates`);
-      console.log('Received matches from edge function:', matches.length);
+      addLog('success', `Successfully matched ${allMatches.length} candidates`);
+      console.log('Received matches from edge function:', allMatches.length);
 
       // Save search to database
       addLog('info', 'Saving search to database...');
       setSearchStatus('Saving search results...');
-      
+
       const { data: searchData, error: searchError } = await supabase
         .from('job_searches')
         .insert({
           user_id: user.id,
           job_description: jobDescription,
-          total_candidates: total,
+          total_candidates: totalCandidatesFound,
         })
         .select()
         .single();
@@ -559,7 +587,7 @@ export const CandidateHunting = () => {
       addLog('success', `Search saved with ID: ${searchData.id}`);
 
       // Save all candidate matches
-      const candidateRecords = matches.map((match: CandidateMatch) => ({
+      const candidateRecords = allMatches.map((match: CandidateMatch) => ({
         search_id: searchData.id,
         candidate_id: match.id,
         candidate_name: match.full_name,
@@ -567,8 +595,8 @@ export const CandidateHunting = () => {
         candidate_phone: match.phone_number,
         candidate_location: match.location,
         job_role: match.job_title,
-        experience_years: match.years_of_experience !== null 
-          ? Math.round(match.years_of_experience * 100) / 100 
+        experience_years: match.years_of_experience !== null
+          ? Math.round(match.years_of_experience * 100) / 100
           : null,
         match_score: match.matchScore,
         reasoning: match.reasoning,
@@ -592,14 +620,14 @@ export const CandidateHunting = () => {
       setSearchStatus('Search completed successfully');
       setProcessingComplete(true);
 
-      setMatches(matches);
-      setTotalCandidates(total);
+      setMatches(allMatches);
+      setTotalCandidates(totalCandidatesFound);
       setCurrentSearchId(searchData.id);
       setCurrentPage(1);
 
       toast({
         title: 'Search Complete!',
-        description: `Found ${matches.length} matching candidates`,
+        description: `Found ${allMatches.length} matching candidates`,
       });
     } catch (error) {
       console.error('Search error:', error);

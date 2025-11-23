@@ -14,9 +14,11 @@ serve(async (req) => {
 
   // Parse request body first
   let jobDescription: string;
+  let candidateIds: string[] | undefined;
   try {
     const body = await req.json();
     jobDescription = body.jobDescription;
+    candidateIds = Array.isArray(body.candidateIds) ? body.candidateIds : undefined;
   } catch (error) {
     return new Response(
       JSON.stringify({ error: 'Invalid request body' }),
@@ -49,12 +51,13 @@ serve(async (req) => {
           Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // Load all 4 API keys for parallel processing
+        // Load all 5 API keys for parallel processing
         const GEMINI_API_KEYS = [
           Deno.env.get('GEMINI_API_KEY_1'),
           Deno.env.get('GEMINI_API_KEY_2'),
           Deno.env.get('GEMINI_API_KEY_3'),
-          Deno.env.get('GEMINI_API_KEY_4')
+          Deno.env.get('GEMINI_API_KEY_4'),
+          Deno.env.get('GEMINI_API_KEY_5')
         ];
         
         // Validate all keys are present
@@ -82,10 +85,16 @@ serve(async (req) => {
         // Fetch all user's profiles (skip vector search for now to ensure reliability)
         sendEvent('log', { level: 'info', message: 'Fetching all your candidates...' });
         
-        const { data: profiles, error: fetchError } = await supabaseClient
+        let query = supabaseClient
           .from('profiles')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', user.id);
+
+        if (candidateIds && candidateIds.length > 0) {
+          query = query.in('id', candidateIds);
+        }
+
+        const { data: profiles, error: fetchError } = await query
           .order('created_at', { ascending: false });
 
         if (fetchError) {
@@ -110,10 +119,11 @@ serve(async (req) => {
         sendEvent('progress', { current: 0, total: profiles.length });
         console.log(`[PROCESSING] ${profiles.length} candidates in parallel batches`);
 
-        // PARALLEL PROCESSING: 4 batches of 5 candidates each (20 total at once)
-        const BATCH_SIZE = 5;
-        const PARALLEL_BATCHES = 4;
-        const allRankedCandidates: any[] = [];
+        try {
+          // PARALLEL PROCESSING: 5 batches of 7 candidates each (35 total at once)
+          const BATCH_SIZE = 7;
+          const PARALLEL_BATCHES = 5;
+          const allRankedCandidates: any[] = [];
         
         // Create batches of 5 candidates
         const batches: any[][] = [];
@@ -122,9 +132,9 @@ serve(async (req) => {
         }
         
         console.log(`[PROCESSING] Created ${batches.length} batches of up to ${BATCH_SIZE} candidates each`);
-        sendEvent('log', { level: 'info', message: `Processing ${batches.length} batches (${BATCH_SIZE} candidates per batch)` });
+        sendEvent('log', { level: 'info', message: `Processing ${batches.length} batches (${BATCH_SIZE} candidates per batch, 5 APIs in parallel)` });
         
-        // Process batches in parallel groups of 4
+        // Process batches in parallel groups of 5
         for (let groupStart = 0; groupStart < batches.length; groupStart += PARALLEL_BATCHES) {
           const parallelBatches = batches.slice(groupStart, groupStart + PARALLEL_BATCHES);
           const groupNumber = Math.floor(groupStart / PARALLEL_BATCHES) + 1;
@@ -134,13 +144,14 @@ serve(async (req) => {
           
           const batchPromises = parallelBatches.map(async (batch, batchIndexInGroup) => {
             const globalBatchIndex = groupStart + batchIndexInGroup;
-            const apiKeyIndex = batchIndexInGroup; // Use batchIndexInGroup to ensure each batch in parallel group gets unique key
+            const apiKeyIndex = batchIndexInGroup;
             const API_KEY = GEMINI_API_KEYS[apiKeyIndex];
             const batchNum = globalBatchIndex + 1;
             const totalBatches = batches.length;
             
-            console.log(`[BATCH ${batchNum}/${totalBatches}] Processing ${batch.length} candidates with GEMINI_API_KEY_${apiKeyIndex + 1}`);
-            sendEvent('log', { level: 'info', message: `Batch ${batchNum}/${totalBatches}: Analyzing ${batch.length} candidates with API KEY ${apiKeyIndex + 1}` });
+            try {
+              console.log(`[BATCH ${batchNum}/${totalBatches}] Processing ${batch.length} candidates with GEMINI_API_KEY_${apiKeyIndex + 1}`);
+              sendEvent('log', { level: 'info', message: `Batch ${batchNum}/${totalBatches}: Analyzing ${batch.length} candidates with API KEY ${apiKeyIndex + 1}` });
             
             // Calculate global indices for this batch
             const startIndex = groupStart * BATCH_SIZE + batchIndexInGroup * BATCH_SIZE;
@@ -294,7 +305,13 @@ serve(async (req) => {
             }
             
             return batchRanked;
-          });
+          } catch (batchError: any) {
+            console.error(`[BATCH ERROR] Failed to process batch:`, batchError);
+            sendEvent('log', { level: 'error', message: `Batch processing error: ${batchError.message}` });
+            // Return empty array for failed batch
+            return [];
+          }
+        });
           
           const batchResults = await Promise.all(batchPromises);
           const processedCount = batchResults.flat().length;
@@ -303,8 +320,9 @@ serve(async (req) => {
           batchResults.forEach(result => allRankedCandidates.push(...result));
         }
 
-        console.log(`[PROCESSING] All batches complete. Total: ${allRankedCandidates.length} candidates`);
-        sendEvent('log', { level: 'success', message: `All batches processed: ${allRankedCandidates.length} total candidates` });
+        const processedTotal = allRankedCandidates.length;
+        console.log(`[PROCESSING] All batches complete. Total processed: ${processedTotal} candidates (of ${profiles.length})`);
+        sendEvent('log', { level: 'success', message: `All batches processed: ${processedTotal} total candidates (of ${profiles.length})` });
 
         // Sort by match score
         allRankedCandidates.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
@@ -381,15 +399,29 @@ serve(async (req) => {
         const validMatches = matches.filter(m => !m.isFallback);
         const fallbackCount = matches.filter(m => m.isFallback).length;
         const successCount = validMatches.length;
+        const isPartial = processedTotal < profiles.length;
         
         console.log(`✓ Successfully matched ${successCount} candidates, ${fallbackCount} required fallback`);
         sendEvent('log', { level: 'success', message: `Successfully matched ${successCount} candidates, ${fallbackCount} fallback` });
 
+        const completeMessage = isPartial
+          ? `Matched ${successCount} candidates (processed ${processedTotal} of ${profiles.length} due to system limits)`
+          : `Successfully matched ${successCount} candidates`;
+
+        console.log(`[COMPLETE] Sending complete event with ${validMatches.length} matches (partial=${isPartial})`);
         sendEvent('complete', { 
           matches: validMatches,
           total: profiles.length,
-          message: `Successfully matched ${successCount} candidates`
+          processed: processedTotal,
+          partial: isPartial,
+          message: completeMessage
         });
+        console.log('[COMPLETE] Complete event sent successfully');
+
+        } catch (processingError: any) {
+          console.error('[PROCESSING ERROR]', processingError);
+          sendEvent('error', { message: `Processing failed: ${processingError.message || 'Unknown error'}` });
+        }
 
         controller.close();
 

@@ -155,15 +155,16 @@ serve(async (req) => {
       return { fileName: file.name, fileUrl: publicUrl };
     });
 
-    // Load exactly 4 API keys for true parallel processing
+    // Load exactly 5 API keys for maximum parallel processing
     const GEMINI_API_KEYS = [
       Deno.env.get('GEMINI_API_KEY_1'),
       Deno.env.get('GEMINI_API_KEY_2'),
       Deno.env.get('GEMINI_API_KEY_3'),
-      Deno.env.get('GEMINI_API_KEY_4')
+      Deno.env.get('GEMINI_API_KEY_4'),
+      Deno.env.get('GEMINI_API_KEY_5')
     ];
     
-    // Validate all 4 keys are present
+    // Validate all 5 keys are present
     const missingKeys = GEMINI_API_KEYS.map((key, i) => {
       if (!key) return `GEMINI_API_KEY_${i + 1}`;
       return null;
@@ -182,53 +183,39 @@ serve(async (req) => {
     let allCandidates: any[] = [];
     const batchFailedFiles: string[] = [];
     
-    // PARALLEL PROCESSING: 4 batches of 2 resumes each
-    const BATCH_SIZE = 2;
-    const PARALLEL_BATCHES = 4;
+    // ULTRA-FAST PARALLEL STRATEGY: Divide resumes evenly among APIs, process all at once
+    const resumesPerAPI = Math.ceil(validFiles.length / GEMINI_API_KEYS.length);
+    console.log(`[PROCESSING] Dividing ${validFiles.length} resumes among ${GEMINI_API_KEYS.length} APIs (${resumesPerAPI} per API)`);
     
-    // Split into batches of 2
-    const batches: any[][] = [];
-    for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
-      batches.push(validFiles.slice(i, i + BATCH_SIZE));
-    }
-    
-    console.log(`[PROCESSING] Created ${batches.length} batches of up to ${BATCH_SIZE} resumes each`);
-    
-    // Process batches in parallel groups of 4
-    for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
-      const parallelBatches = batches.slice(i, i + PARALLEL_BATCHES);
-      console.log(`[PROCESSING] Starting parallel batch group ${Math.floor(i / PARALLEL_BATCHES) + 1}: ${parallelBatches.length} batches in parallel`);
+    // Process each API's assigned resumes
+    const apiPromises = GEMINI_API_KEYS.map(async (API_KEY, apiKeyIndex) => {
+      const keyName = `GEMINI_API_KEY_${apiKeyIndex + 1}`;
+      const startIdx = apiKeyIndex * resumesPerAPI;
+      const endIdx = Math.min(startIdx + resumesPerAPI, validFiles.length);
+      const assignedFiles = validFiles.slice(startIdx, endIdx);
       
-      const batchPromises = parallelBatches.map(async (batch, batchIndex) => {
-        // Use global batch index to ensure each batch gets a unique API key
-        const globalBatchIndex = i + batchIndex;
-        const apiKeyIndex = globalBatchIndex % GEMINI_API_KEYS.length;
-        const API_KEY = GEMINI_API_KEYS[apiKeyIndex];
-        const keyName = `GEMINI_API_KEY_${apiKeyIndex + 1}`;
+      console.log(`[${keyName}] Processing ${assignedFiles.length} resumes (${startIdx + 1}-${endIdx})`);
+      
+      // Process all assigned resumes in parallel for this API
+      const resumePromises = assignedFiles.map(async (file: any) => {
+        const globalFileIndex = validFiles.indexOf(file) + 1;
         
         try {
-          console.log(`[BATCH ${globalBatchIndex + 1}] Processing ${batch.length} resume(s) with ${keyName}`);
-          console.log(`[BATCH ${globalBatchIndex + 1}] Files:`, batch.map((f: any) => f.name).join(', '));
+          console.log(`[RESUME ${globalFileIndex}/${validFiles.length}] ${keyName} processing "${file.name}"`);
           
-          // Convert files to base64 for Vision API
-          const fileDataPromises = batch.map(async (file: any) => {
-            const base64 = await fileToBase64(file);
-            return {
-              fileName: file.name,
-              mimeType: file.type || 'application/pdf',
-              data: base64
-            };
-          });
+          const base64 = await fileToBase64(file);
           
-          const filesData = await Promise.all(fileDataPromises);
-          
-          const parseResumes = async () => {
-            console.log(`[BATCH ${globalBatchIndex + 1}] Calling Gemini Vision API...`);
-            
-            // Build parts array with inline data for each file
-            const parts: any[] = [
+          const parseResume = async () => {
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
               {
-                text: `Extract data from ${batch.length} resume file(s). Return ONLY valid JSON.
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      {
+                        text: `Extract data from this single resume. Return ONLY valid JSON.
 
 EXTRACT:
 - full_name (MUST be person's real name from resume, NOT filename)
@@ -240,28 +227,16 @@ EXTRACT:
 - education (max 150 chars)
 - resume_text (FULL raw text content from resume for AI matching)
 
-CRITICAL: All ${batch.length} resume(s) MUST be included in output.
-Output format: {"candidates": [...]}`
-              }
-            ];
-            
-            // Add each file as inline data
-            filesData.forEach((fileData) => {
-              parts.push({
-                inlineData: {
-                  mimeType: fileData.mimeType,
-                  data: fileData.data
-                }
-              });
-            });
-            
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts }],
+Output format: {"candidate": {...}}`
+                      },
+                      {
+                        inlineData: {
+                          mimeType: file.type || 'application/pdf',
+                          data: base64
+                        }
+                      }
+                    ]
+                  }],
                   generationConfig: {
                     temperature: 0,
                     maxOutputTokens: 8192,
@@ -273,74 +248,47 @@ Output format: {"candidates": [...]}`
 
             if (!response.ok) {
               const errorText = await response.text();
-              console.error(`[BATCH ${globalBatchIndex + 1}] API Error ${response.status}:`, errorText);
-              throw new Error(`Batch failed: ${response.status} - ${errorText}`);
+              console.error(`[RESUME ${globalFileIndex}] API Error ${response.status}:`, errorText);
+              throw new Error(`Failed: ${response.status} - ${errorText}`);
             }
 
-            const result = await response.json();
-            console.log(`[BATCH ${globalBatchIndex + 1}] API Response structure:`, {
-              hasCandidates: !!result.candidates,
-              candidatesLength: result.candidates?.length,
-              hasContent: !!result.candidates?.[0]?.content,
-              hasParts: !!result.candidates?.[0]?.content?.parts,
-              partsLength: result.candidates?.[0]?.content?.parts?.length
-            });
-            
-            return result;
+            return await response.json();
           };
 
-          const result = await retryWithBackoff(parseResumes, 3, 2000);
+          const result = await retryWithBackoff(parseResume, 3, 2000);
           const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
           
           if (!rawText) {
-            console.error(`[BATCH ${globalBatchIndex + 1}] ⚠ No raw text in API response`);
-            batch.forEach((f: any) => batchFailedFiles.push(f.name));
-            return [];
+            console.error(`[RESUME ${globalFileIndex}] ⚠ No raw text in API response for "${file.name}"`);
+            batchFailedFiles.push(file.name);
+            return null;
           }
           
-          try {
-            const parsedData = JSON.parse(rawText);
-            if (parsedData.candidates && Array.isArray(parsedData.candidates)) {
-              if (parsedData.candidates.length === 0) {
-                console.error(`[BATCH ${globalBatchIndex + 1}] ⚠ API returned empty candidates array`);
-                batch.forEach((f: any) => batchFailedFiles.push(f.name));
-                return [];
-              }
-              
-              console.log(`[BATCH ${globalBatchIndex + 1}] ✓ Successfully parsed ${parsedData.candidates.length} candidates`);
-              
-              if (parsedData.candidates.length < batch.length) {
-                console.warn(`[BATCH ${globalBatchIndex + 1}] ⚠ Expected ${batch.length} candidates but got ${parsedData.candidates.length}`);
-              }
-              
-              return parsedData.candidates;
-            } else {
-              console.error(`[BATCH ${globalBatchIndex + 1}] ⚠ Parsed data missing candidates array`);
-              batch.forEach((f: any) => batchFailedFiles.push(f.name));
-              return [];
-            }
-          } catch (parseError) {
-            console.error(`[BATCH ${globalBatchIndex + 1}] ✗ JSON parse error:`, parseError);
-            console.error(`[BATCH ${globalBatchIndex + 1}] Raw text (first 500 chars):`, rawText.substring(0, 500));
-            batch.forEach((f: any) => batchFailedFiles.push(f.name));
-            return [];
+          const parsedData = JSON.parse(rawText);
+          if (parsedData.candidate) {
+            console.log(`[RESUME ${globalFileIndex}] ✓ Successfully parsed "${parsedData.candidate.full_name || file.name}" (${globalFileIndex}/${validFiles.length})`);
+            return parsedData.candidate;
+          } else {
+            console.error(`[RESUME ${globalFileIndex}] ⚠ Missing candidate object for "${file.name}"`);
+            batchFailedFiles.push(file.name);
+            return null;
           }
         } catch (error) {
-          console.error(`[BATCH ${globalBatchIndex + 1}] ✗ Exception during batch processing:`, error);
-          batch.forEach((f: any) => batchFailedFiles.push(f.name));
-          return [];
+          console.error(`[RESUME ${globalFileIndex}] ✗ Exception processing "${file.name}":`, error);
+          batchFailedFiles.push(file.name);
+          return null;
         }
       });
       
-      const batchResults = await Promise.all(batchPromises);
-      batchResults.forEach(candidates => {
-        if (candidates.length > 0) {
-          allCandidates.push(...candidates);
-        }
-      });
-      
-      console.log(`[PROCESSING] Parallel batch group complete. Total candidates so far: ${allCandidates.length}`);
-    }
+      const results = await Promise.all(resumePromises);
+      return results.filter(r => r !== null);
+    });
+    
+    console.log(`[PROCESSING] All ${GEMINI_API_KEYS.length} APIs started - processing ${validFiles.length} resumes simultaneously...`);
+    const apiResults = await Promise.all(apiPromises);
+    allCandidates = apiResults.flat();
+    
+    console.log(`[PROCESSING] Complete - All workers finished. Processed ${allCandidates.length}/${validFiles.length} resumes`);
 
     // Wait for file uploads to complete
     const uploadedFiles = await Promise.all(fileUploadPromises);
@@ -414,24 +362,30 @@ Output format: {"candidates": [...]}`
     const embeddingResults = await Promise.all(embeddingPromises);
     console.log('✓ Background embedding generation complete');
 
-    // Validate and insert candidates
+    // Validate and insert candidates (more lenient - allow partial data)
     const validCandidates = embeddingResults.filter(result => {
       if (!result) return false;
       const { candidate } = result;
       
-      const hasRequiredFields = 
-        candidate.full_name && 
-        candidate.email && 
-        candidate.job_title && 
-        candidate.sector && 
-        Array.isArray(candidate.skills) && 
-        candidate.skills.length > 0;
+      // Only require full_name - allow other fields to be null/empty
+      const hasMinimumFields = candidate.full_name && candidate.full_name.trim().length > 0;
       
-      if (!hasRequiredFields) {
-        console.warn(`[VALIDATION] Rejected candidate: ${candidate.full_name || 'UNKNOWN'} - Missing required fields`);
+      if (!hasMinimumFields) {
+        console.warn(`[VALIDATION] Rejected candidate: ${candidate.full_name || 'UNKNOWN'} - Missing name`);
+      } else {
+        // Log warning for incomplete data but still process
+        const missingFields = [];
+        if (!candidate.email) missingFields.push('email');
+        if (!candidate.job_title) missingFields.push('job_title');
+        if (!candidate.sector) missingFields.push('sector');
+        if (!candidate.skills || candidate.skills.length === 0) missingFields.push('skills');
+        
+        if (missingFields.length > 0) {
+          console.warn(`[VALIDATION] Processing ${candidate.full_name} with missing fields: ${missingFields.join(', ')}`);
+        }
       }
       
-      return hasRequiredFields;
+      return hasMinimumFields;
     });
 
     const insertPromises = validCandidates.map(async (result) => {
@@ -442,13 +396,13 @@ Output format: {"candidates": [...]}`
         .from('profiles')
         .insert({
           full_name: candidate.full_name,
-          email: candidate.email,
+          email: candidate.email || `${candidate.full_name.replace(/\s+/g, '_').toLowerCase()}@noemail.com`,
           phone_number: candidate.phone_number || null,
           location: candidate.location || null,
-          job_title: candidate.job_title,
+          job_title: candidate.job_title || 'Not Specified',
           years_of_experience: candidate.years_of_experience || 0,
-          sector: candidate.sector,
-          skills: candidate.skills || [],
+          sector: candidate.sector || 'General',
+          skills: (candidate.skills && candidate.skills.length > 0) ? candidate.skills : ['General'],
           experience: candidate.experience || null,
           education: candidate.education || null,
           resume_text: candidate.resume_text || null,
@@ -458,10 +412,11 @@ Output format: {"candidates": [...]}`
         });
 
       if (insertError) {
-        console.error(`Failed to insert ${candidate.full_name}:`, insertError);
-        return { success: false, candidate: candidate.full_name };
+        console.error(`✗ Failed to insert ${candidate.full_name}:`, insertError);
+        return { success: false, candidate: candidate.full_name, error: insertError.message };
       }
       
+      console.log(`✓ Successfully inserted ${candidate.full_name}`);
       return { success: true, candidate: candidate.full_name };
     });
 
