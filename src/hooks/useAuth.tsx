@@ -16,6 +16,13 @@ export const useAuth = () => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Clear any lingering errors on sign out
+        if (event === 'SIGNED_OUT') {
+          // Clear state immediately
+          setSession(null);
+          setUser(null);
+        }
       }
     );
 
@@ -87,8 +94,99 @@ export const useAuth = () => {
     }
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) throw error;
+      
+      return { error: null };
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      return { error };
+    }
+  };
+
+  const updateProfile = async (updates: {
+    full_name?: string;
+    avatar_url?: string;
+  }) => {
+    try {
+      if (!user) throw new Error('No user logged in');
+
+      const { error } = await supabase.auth.updateUser({
+        data: updates,
+      });
+
+      if (error) throw error;
+
+      // Also update profiles table
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      toast({
+        title: "Success",
+        description: "Profile updated successfully.",
+      });
+      
+      return { error: null };
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      return { error };
+    }
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Password updated successfully.",
+      });
+      
+      return { error: null };
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      return { error };
+    }
+  };
+
   const signOut = async () => {
     try {
+      // Clear local state first to prevent queries
+      setUser(null);
+      setSession(null);
+      
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
 
@@ -97,11 +195,14 @@ export const useAuth = () => {
         description: "You have been successfully signed out.",
       });
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      // Only show error if it's not a session-related error
+      if (!error.message.includes('session')) {
+        toast({
+          title: "Error",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -111,6 +212,9 @@ export const useAuth = () => {
     loading,
     signUp,
     signIn,
+    signInWithGoogle,
+    updateProfile,
+    updatePassword,
     signOut,
   };
 };

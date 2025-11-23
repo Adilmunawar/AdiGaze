@@ -366,6 +366,9 @@ export const CandidateHunting = () => {
     setShowLogsDialog(true);
     setProcessingComplete(false);
     setProcessingError(false);
+    
+    addLog('info', 'Booting edge functions...');
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -373,6 +376,13 @@ export const CandidateHunting = () => {
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('No active session found');
+
+      addLog('info', 'Starting candidate matching process...');
+      setSearchStatus('Starting candidate matching...');
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      addLog('info', 'Fetching candidates from database...');
+      setSearchStatus('Fetching candidates...');
 
       const response = await fetch(
         'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/match-candidates',
@@ -394,6 +404,8 @@ export const CandidateHunting = () => {
       const decoder = new TextDecoder();
       let buffer = '';
       let finalData: any = null;
+      let totalCandidatesFound = 0;
+      let processedCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -409,13 +421,97 @@ export const CandidateHunting = () => {
           if (line.startsWith('data:')) {
             const data = JSON.parse(line.slice(5).trim());
             
+            // Handle different types of log messages
             if (data.level && data.message) {
-              addLog(data.level, data.message);
-              setSearchStatus(data.message);
+              const message = data.message;
+              
+              // Hide all API key and batch-specific technical messages
+              if (message.includes('API KEY') || 
+                  message.includes('API key') ||
+                  message.includes('GEMINI_API_KEY') ||
+                  message.includes('API Response structure') ||
+                  message.includes('Calling Gemini API') ||
+                  message.includes('attempt') ||
+                  message.match(/Batch \d+\/\d+: Analyzing/i) ||
+                  message.includes('Analyzing') && message.includes('candidates with')) {
+                continue;
+              }
+              
+              // Detect when candidates are found
+              if (message.includes('Found') && message.includes('candidates in your database')) {
+                const count = message.match(/\d+/)?.[0];
+                if (count) {
+                  totalCandidatesFound = parseInt(count);
+                  addLog('success', message);
+                  addLog('info', `Analyzing ${count} candidates...`);
+                  setSearchStatus(`Analyzing ${count} candidates...`);
+                }
+                continue;
+              }
+              
+              // Track batch completion with cumulative counts
+              if (message.match(/Batch \d+\/\d+ complete:/i)) {
+                const countMatch = message.match(/(\d+) candidates/);
+                if (countMatch) {
+                  const batchSize = parseInt(countMatch[1]);
+                  processedCount += batchSize;
+                  const percentage = Math.round((processedCount / totalCandidatesFound) * 100);
+                  addLog('success', `Processed ${processedCount} of ${totalCandidatesFound} candidates (${percentage}%)`);
+                  setSearchStatus(`Processing: ${processedCount}/${totalCandidatesFound} candidates analyzed`);
+                  setSearchProgress(percentage);
+                }
+                continue;
+              }
+              
+              // Show group processing info
+              if (message.includes('Group') && message.includes('Processing')) {
+                const groupMatch = message.match(/Group (\d+)\/(\d+)/);
+                if (groupMatch) {
+                  addLog('info', `Processing group ${groupMatch[1]} of ${groupMatch[2]}`);
+                  setSearchStatus(`Processing group ${groupMatch[1]} of ${groupMatch[2]}`);
+                }
+                continue;
+              }
+              
+              // Simplify group completion messages
+              if (message.includes('Group') && message.includes('complete')) {
+                const processedMatch = message.match(/(\d+) candidates processed/);
+                if (processedMatch) {
+                  addLog('success', `Group completed: ${processedMatch[1]} candidates processed`);
+                }
+                continue;
+              }
+              
+              // Show total completion
+              if (message.includes('All batches processed')) {
+                const countMatch = message.match(/(\d+) total/);
+                if (countMatch) {
+                  addLog('success', `Analysis complete: ${countMatch[1]} candidates processed`);
+                  setSearchStatus('Finalizing results...');
+                  setSearchProgress(100);
+                }
+                continue;
+              }
+              
+              // Hide processing batches messages
+              if (message.includes('Processing') && message.includes('batches') && message.includes('per batch')) {
+                continue;
+              }
+              
+              // Show other important messages without [PROCESSING] or [BATCH] prefixes
+              if (!message.includes('[PROCESSING]') && !message.includes('[BATCH') && !message.includes('Created')) {
+                addLog(data.level, message);
+                if (!message.includes('complete')) {
+                  setSearchStatus(message);
+                }
+              }
             }
             
+            // Handle progress updates from backend
             if (data.current !== undefined && data.total !== undefined) {
-              setSearchProgress((data.current / data.total) * 100);
+              const backendProgress = Math.round((data.current / data.total) * 100);
+              // Only update if it's higher than current progress to prevent jumps
+              setSearchProgress(prev => Math.max(prev, backendProgress));
             }
             
             if (data.matches) {
@@ -438,11 +534,13 @@ export const CandidateHunting = () => {
       const matches = finalData.matches;
       const total = finalData.total || 0;
 
-      addLog('success', `Successfully matched ${matches.length} candidates!`);
+      addLog('success', `Successfully matched ${matches.length} candidates`);
       console.log('Received matches from edge function:', matches.length);
 
       // Save search to database
       addLog('info', 'Saving search to database...');
+      setSearchStatus('Saving search results...');
+      
       const { data: searchData, error: searchError } = await supabase
         .from('job_searches')
         .insert({
@@ -489,9 +587,9 @@ export const CandidateHunting = () => {
         throw candidatesError;
       }
 
-      addLog('success', 'All candidate records saved successfully!');
+      addLog('success', 'All candidate records saved successfully');
       setSearchProgress(100);
-      setSearchStatus('Search completed!');
+      setSearchStatus('Search completed successfully');
       setProcessingComplete(true);
 
       setMatches(matches);

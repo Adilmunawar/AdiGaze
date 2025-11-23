@@ -1,24 +1,70 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ResumeUpload } from '@/components/ResumeUpload';
 import { CandidateHunting } from '@/components/CandidateHunting';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Users, Upload, LogOut, Bookmark, History } from 'lucide-react';
-import adiLinkLogo from '@/assets/adilink-logo.png';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Users, Upload, LogOut, Bookmark, History, Settings } from 'lucide-react';
+import adiGazeLogo from '@/assets/adigaze-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import Footer from '@/components/Footer';
 
 const Index = () => {
   const { user, loading, signOut } = useAuth();
   const navigate = useNavigate();
+  const [userName, setUserName] = useState<string>('');
+  const [avatarUrl, setAvatarUrl] = useState<string>('');
 
   useEffect(() => {
     if (!loading && !user) {
       navigate('/auth');
     }
   }, [user, loading, navigate]);
+
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      if (user) {
+        try {
+          // Set name
+          if (user.user_metadata?.full_name) {
+            setUserName(user.user_metadata.full_name);
+          } else if (user.email) {
+            setUserName(user.email.split('@')[0]);
+          } else {
+            setUserName('User');
+          }
+
+          // Set avatar
+          setAvatarUrl(user.user_metadata?.avatar_url || '');
+
+          // Fetch from profiles table
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('full_name, avatar_url')
+            .eq('id', user.id)
+            .single();
+
+          // Ignore errors during sign out
+          if (error && !error.message.includes('JWT')) {
+            console.error('Error loading profile:', error);
+          }
+
+          if (data) {
+            if (data.full_name) setUserName(data.full_name);
+            if (data.avatar_url) setAvatarUrl(data.avatar_url);
+          }
+        } catch (error) {
+          // Suppress errors during sign out
+          console.log('Profile load error (likely during sign out)');
+        }
+      }
+    };
+
+    loadUserProfile();
+  }, [user]);
 
   if (loading) {
     return (
@@ -48,17 +94,26 @@ const Index = () => {
         <header className="mb-12 text-center space-y-6">
           <div className="inline-flex items-center justify-center mb-6 relative group">
             <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse-glow group-hover:bg-primary/30 transition-all duration-500" />
-            <img src={adiLinkLogo} alt="AdiLink Logo" className="h-48 md:h-56 w-auto relative z-10 drop-shadow-2xl transform group-hover:scale-105 transition-transform duration-300" />
+            <img src={adiGazeLogo} alt="AdiGaze Logo" className="h-48 md:h-56 w-auto relative z-10 drop-shadow-2xl transform group-hover:scale-105 transition-transform duration-300" />
           </div>
-          <h1 className="text-5xl md:text-7xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-primary via-secondary to-accent animate-fade-in drop-shadow-lg">
-            AdiLink
-          </h1>
-          <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed font-medium">
-            AI-Powered Recruitment Platform - Upload resumes, store candidate data, and find the perfect match with intelligent ranking
-          </p>
           <div className="flex flex-col items-center justify-center gap-5">
-            <div className="flex items-center gap-3 text-muted-foreground bg-card/60 backdrop-blur-sm px-6 py-3 rounded-full border border-border/50 shadow-[var(--shadow-card)]">
-              <span className="text-sm font-medium">Welcome, {user.email}</span>
+            <div className="flex items-center gap-4 text-muted-foreground bg-card/60 backdrop-blur-sm px-6 py-3 rounded-full border border-border/50 shadow-[var(--shadow-card)]">
+              <Avatar className="h-10 w-10 border-2 border-primary/20">
+                <AvatarImage src={avatarUrl} alt={userName} />
+                <AvatarFallback>
+                  {userName?.split(' ').map(n => n[0]).join('') || user.email?.[0].toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <span className="text-sm font-medium">Welcome, {userName || user.email}</span>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => navigate('/settings')}
+                className="gap-2 hover:bg-accent/50 transition-colors"
+              >
+                <Settings className="h-4 w-4" />
+                Settings
+              </Button>
               <Button 
                 variant="ghost" 
                 size="sm" 
