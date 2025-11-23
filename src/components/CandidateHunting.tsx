@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Sparkles, Award, MapPin, Download, X, Bookmark } from 'lucide-react';
+import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   Pagination,
   PaginationContent,
@@ -59,13 +61,16 @@ export const CandidateHunting = () => {
   const [showLogsDialog, setShowLogsDialog] = useState(false);
   const [processingComplete, setProcessingComplete] = useState(false);
   const [processingError, setProcessingError] = useState(false);
+  const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
+  const [selectedJobTitles, setSelectedJobTitles] = useState<string[]>([]);
   const { toast } = useToast();
   
   const itemsPerPage = 10;
 
-  // Fetch bookmarks and load search based on URL parameter or last search
+  // Fetch bookmarks, job titles, and load search based on URL parameter or last search
   useEffect(() => {
     fetchBookmarks();
+    fetchJobTitles();
     const searchId = searchParams.get('search');
     if (searchId) {
       loadSpecificSearch(searchId);
@@ -73,6 +78,26 @@ export const CandidateHunting = () => {
       loadLastSearch();
     }
   }, [searchParams]);
+
+  const fetchJobTitles = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('job_title')
+        .eq('user_id', user.id)
+        .not('job_title', 'is', null);
+
+      if (error) throw error;
+
+      const uniqueTitles = [...new Set(data?.map(p => p.job_title).filter(Boolean) as string[])];
+      setAvailableJobTitles(uniqueTitles.sort());
+    } catch (error) {
+      console.error('Error fetching job titles:', error);
+    }
+  };
 
   const fetchBookmarks = async () => {
     try {
@@ -354,6 +379,23 @@ export const CandidateHunting = () => {
     setProcessingLogs(prev => [...prev, { timestamp, level, message }]);
   };
 
+  const mergeMatches = (existing: CandidateMatch[], incoming: CandidateMatch[]): CandidateMatch[] => {
+    const map = new Map<string, CandidateMatch>();
+
+    for (const match of existing) {
+      map.set(match.id, match);
+    }
+
+    for (const match of incoming) {
+      const current = map.get(match.id);
+      if (!current || (typeof match.matchScore === 'number' && match.matchScore > current.matchScore)) {
+        map.set(match.id, match);
+      }
+    }
+
+    return Array.from(map.values());
+  };
+
   const runMatchingChunk = async (
     accessToken: string,
     candidateIds: string[],
@@ -384,6 +426,8 @@ export const CandidateHunting = () => {
     let buffer = '';
     let finalData: any = null;
     let currentEvent = '';
+    let collectedMatches: CandidateMatch[] = [];
+    let errorMessage: string | null = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -411,9 +455,27 @@ export const CandidateHunting = () => {
             continue;
           }
 
+          if (currentEvent === 'partial' && data.matches) {
+            const newMatches = data.matches as CandidateMatch[];
+            collectedMatches = mergeMatches(collectedMatches, newMatches);
+
+            const processed = typeof data.processed === 'number' ? data.processed : collectedMatches.length;
+            const total = typeof data.total === 'number' && data.total > 0 ? data.total : candidateIds.length;
+            const progress = Math.round((processed / total) * 100);
+            setSearchProgress(progress);
+
+            addLog('info', `Received partial results: ${collectedMatches.length} candidates processed so far...`);
+            currentEvent = '';
+            continue;
+          }
+
           if (currentEvent === 'error') {
             console.error('[SSE] Error event:', data.message);
-            throw new Error(data.message || 'Processing failed');
+            errorMessage = data.message || 'Processing failed';
+            addLog('error', errorMessage);
+            setSearchStatus('Error during processing - attempting to use partial results...');
+            currentEvent = '';
+            continue;
           }
 
           if (currentEvent) {
@@ -421,6 +483,11 @@ export const CandidateHunting = () => {
           }
 
           if (data.level && data.message) {
+            if (typeof data.processed === 'number' && typeof data.total === 'number' && data.total > 0) {
+              const progress = Math.round((data.processed / data.total) * 100);
+              setSearchProgress(progress);
+            }
+
             const message: string = data.message;
 
             if (
@@ -457,15 +524,24 @@ export const CandidateHunting = () => {
 
     console.log('[SSE] Batch stream ended. finalData:', finalData ? 'present' : 'missing');
 
-    if (!finalData || !finalData.matches) {
-      throw new Error('No results received from matching process');
+    const effectiveData = finalData || (collectedMatches.length
+      ? {
+          matches: collectedMatches,
+          processed: collectedMatches.length,
+          total: candidateIds.length,
+          partial: true,
+        }
+      : null);
+
+    if (!effectiveData || !effectiveData.matches) {
+      throw new Error(errorMessage || 'No results received from matching process');
     }
 
-    const matches: CandidateMatch[] = finalData.matches;
-    const totalInChunk = finalData.total || matches.length;
-    const processed = finalData.processed || matches.length;
+    const matches: CandidateMatch[] = effectiveData.matches;
+    const totalInChunk = effectiveData.total || matches.length;
+    const processed = effectiveData.processed || matches.length;
 
-    if (finalData.partial) {
+    if ((effectiveData as any).partial) {
       addLog('info', `Batch ${batchIndex + 1}/${totalBatches}: analyzed ${processed} of ${totalInChunk} candidates (partial due to system limits).`);
     } else {
       addLog('success', `Batch ${batchIndex + 1}/${totalBatches} complete: ${matches.length} candidates analyzed.`);
@@ -506,10 +582,17 @@ export const CandidateHunting = () => {
       addLog('info', 'Fetching candidates from database...');
       setSearchStatus('Fetching candidates...');
 
-      const { data: profileRows, error: profilesError } = await supabase
+      let query = supabase
         .from('profiles')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('user_id', user.id);
+
+      // Apply job title filter if selected
+      if (selectedJobTitles.length > 0) {
+        query = query.in('job_title', selectedJobTitles);
+      }
+
+      const { data: profileRows, error: profilesError } = await query
         .order('created_at', { ascending: false });
 
       if (profilesError) throw profilesError;
@@ -530,38 +613,21 @@ export const CandidateHunting = () => {
       addLog('success', `Found ${totalCandidatesFound} candidates in your database`);
       setSearchStatus(`Analyzing ${totalCandidatesFound} candidates...`);
 
-      const CHUNK_SIZE = 20;
-      const candidateIdChunks: string[][] = [];
-      for (let i = 0; i < profileRows.length; i += CHUNK_SIZE) {
-        candidateIdChunks.push(profileRows.slice(i, i + CHUNK_SIZE).map((p) => p.id));
-      }
+      // Send ALL candidates at once - edge function will distribute across APIs
+      const candidateIds = profileRows.map((p) => p.id);
 
-      let allMatches: CandidateMatch[] = [];
-      let processedSoFar = 0;
-
-      for (let i = 0; i < candidateIdChunks.length; i++) {
-        const chunkIds = candidateIdChunks[i];
-
-        const { matches: chunkMatches, processed } = await runMatchingChunk(
-          session.access_token,
-          chunkIds,
-          i,
-          candidateIdChunks.length
-        );
-
-        allMatches = allMatches.concat(chunkMatches);
-        processedSoFar += processed;
-
-        const clampedProcessed = Math.min(processedSoFar, totalCandidatesFound);
-        const progress = Math.round((clampedProcessed / totalCandidatesFound) * 100);
-        setSearchProgress(progress);
-        setSearchStatus(`Analyzed ${clampedProcessed} of ${totalCandidatesFound} candidates...`);
-      }
+      const { matches: allMatches } = await runMatchingChunk(
+        session.access_token,
+        candidateIds,
+        0,
+        1
+      );
 
       if (allMatches.length === 0) {
         throw new Error('No results received from matching process');
       }
 
+      setSearchProgress(100);
       addLog('success', `Successfully matched ${allMatches.length} candidates`);
       console.log('Received matches from edge function:', allMatches.length);
 
@@ -596,7 +662,7 @@ export const CandidateHunting = () => {
         candidate_location: match.location,
         job_role: match.job_title,
         experience_years: match.years_of_experience !== null
-          ? Math.round(match.years_of_experience * 100) / 100
+          ? Math.round(match.years_of_experience)
           : null,
         match_score: match.matchScore,
         reasoning: match.reasoning,
@@ -656,6 +722,61 @@ export const CandidateHunting = () => {
               <p className="text-sm text-muted-foreground">Describe your ideal candidate and let AI find the best matches</p>
             </div>
           </div>
+
+          {availableJobTitles.length > 0 && (
+            <div className="space-y-3 p-4 bg-secondary/5 rounded-lg border border-primary/10">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-5 w-5 text-primary" />
+                <h4 className="font-semibold text-foreground">Filter by Job Title (Optional)</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">Select specific job titles to reduce processing time and improve relevance</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[200px] overflow-y-auto">
+                {availableJobTitles.map((title) => (
+                  <div key={title} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`job-${title}`}
+                      checked={selectedJobTitles.includes(title)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedJobTitles([...selectedJobTitles, title]);
+                        } else {
+                          setSelectedJobTitles(selectedJobTitles.filter(t => t !== title));
+                        }
+                      }}
+                    />
+                    <Label 
+                      htmlFor={`job-${title}`}
+                      className="text-sm font-medium cursor-pointer hover:text-primary transition-colors"
+                    >
+                      {title}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+              {selectedJobTitles.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap pt-2">
+                  <span className="text-sm font-medium text-muted-foreground">Selected:</span>
+                  {selectedJobTitles.map((title) => (
+                    <Badge key={title} variant="secondary" className="gap-1">
+                      {title}
+                      <X 
+                        className="h-3 w-3 cursor-pointer hover:text-destructive" 
+                        onClick={() => setSelectedJobTitles(selectedJobTitles.filter(t => t !== title))}
+                      />
+                    </Badge>
+                  ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedJobTitles([])}
+                    className="h-6 text-xs text-muted-foreground hover:text-destructive"
+                  >
+                    Clear all
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
           <Textarea
             placeholder="Enter job description including required skills, experience, qualifications, and any specific requirements..."
@@ -879,7 +1000,7 @@ export const CandidateHunting = () => {
 
           {totalPages > 1 && (
             <Pagination className="mt-6">
-              <PaginationContent>
+              <PaginationContent className="flex-wrap">
                 <PaginationItem>
                   <PaginationPrevious 
                     onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
@@ -887,38 +1008,57 @@ export const CandidateHunting = () => {
                   />
                 </PaginationItem>
                 
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
-                  // Show first page, last page, current page, and pages around current
-                  const showPage = 
-                    page === 1 || 
-                    page === totalPages || 
-                    (page >= currentPage - 1 && page <= currentPage + 1);
+                {(() => {
+                  const pages = [];
+                  const showMax = 7;
                   
-                  const showEllipsisBefore = page === currentPage - 2 && currentPage > 3;
-                  const showEllipsisAfter = page === currentPage + 2 && currentPage < totalPages - 2;
-                  
-                  if (showEllipsisBefore || showEllipsisAfter) {
-                    return (
-                      <PaginationItem key={page}>
-                        <PaginationEllipsis />
-                      </PaginationItem>
-                    );
+                  if (totalPages <= showMax) {
+                    for (let i = 1; i <= totalPages; i++) {
+                      pages.push(i);
+                    }
+                  } else {
+                    pages.push(1);
+                    
+                    if (currentPage > 3) {
+                      pages.push('ellipsis-start');
+                    }
+                    
+                    const start = Math.max(2, currentPage - 1);
+                    const end = Math.min(totalPages - 1, currentPage + 1);
+                    
+                    for (let i = start; i <= end; i++) {
+                      pages.push(i);
+                    }
+                    
+                    if (currentPage < totalPages - 2) {
+                      pages.push('ellipsis-end');
+                    }
+                    
+                    pages.push(totalPages);
                   }
                   
-                  if (!showPage) return null;
-                  
-                  return (
-                    <PaginationItem key={page}>
-                      <PaginationLink
-                        onClick={() => setCurrentPage(page)}
-                        isActive={currentPage === page}
-                        className="cursor-pointer"
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  );
-                })}
+                  return pages.map((page, idx) => {
+                    if (typeof page === 'string') {
+                      return (
+                        <PaginationItem key={page}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      );
+                    }
+                    
+                    return (
+                      <PaginationItem key={page}>
+                        <PaginationLink
+                          onClick={() => setCurrentPage(page)}
+                          isActive={currentPage === page}
+                          className="cursor-pointer"
+                        >
+                          {page}
+                        </PaginationLink>
+                      </PaginationItem>
+                    );
+                  });
+                })()}
                 
                 <PaginationItem>
                   <PaginationNext 

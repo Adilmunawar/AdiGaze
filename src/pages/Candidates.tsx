@@ -65,12 +65,12 @@ export default function Candidates() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url, avatar_url, created_at, user_id, resume_text, experience')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      setProfiles(data || []);
+      setProfiles((data || []) as Profile[]);
       
       // Extract unique job titles for filter
       const uniqueTitles = Array.from(
@@ -639,37 +639,87 @@ export default function Candidates() {
             </div>
             
             {/* Pagination */}
-            {filteredProfiles.length > ITEMS_PER_PAGE && (
-              <div className="flex items-center justify-center gap-2 mt-6">
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  Previous
-                </Button>
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.ceil(filteredProfiles.length / ITEMS_PER_PAGE) }, (_, i) => i + 1).map((page) => (
-                    <Button
-                      key={page}
-                      variant={currentPage === page ? "default" : "outline"}
-                      onClick={() => setCurrentPage(page)}
-                      size="sm"
-                      className="min-w-[40px]"
-                    >
-                      {page}
-                    </Button>
-                  ))}
+            {filteredProfiles.length > ITEMS_PER_PAGE && (() => {
+              const totalPages = Math.ceil(filteredProfiles.length / ITEMS_PER_PAGE);
+              const getPageNumbers = () => {
+                const pages = [];
+                const showMax = 7; // Maximum pages to show
+                
+                if (totalPages <= showMax) {
+                  // Show all pages if total is less than max
+                  for (let i = 1; i <= totalPages; i++) {
+                    pages.push(i);
+                  }
+                } else {
+                  // Always show first page
+                  pages.push(1);
+                  
+                  if (currentPage > 3) {
+                    pages.push('ellipsis-start');
+                  }
+                  
+                  // Show pages around current
+                  const start = Math.max(2, currentPage - 1);
+                  const end = Math.min(totalPages - 1, currentPage + 1);
+                  
+                  for (let i = start; i <= end; i++) {
+                    pages.push(i);
+                  }
+                  
+                  if (currentPage < totalPages - 2) {
+                    pages.push('ellipsis-end');
+                  }
+                  
+                  // Always show last page
+                  pages.push(totalPages);
+                }
+                
+                return pages;
+              };
+              
+              return (
+                <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    size="sm"
+                  >
+                    Previous
+                  </Button>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {getPageNumbers().map((page, idx) => {
+                      if (typeof page === 'string') {
+                        return (
+                          <span key={page} className="px-2 text-muted-foreground">
+                            ...
+                          </span>
+                        );
+                      }
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? "default" : "outline"}
+                          onClick={() => setCurrentPage(page)}
+                          size="sm"
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    size="sm"
+                  >
+                    Next
+                  </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredProfiles.length / ITEMS_PER_PAGE), p + 1))}
-                  disabled={currentPage === Math.ceil(filteredProfiles.length / ITEMS_PER_PAGE)}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
+              );
+            })()}
           </>
         )}
       </div>
