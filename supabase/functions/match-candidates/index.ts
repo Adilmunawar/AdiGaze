@@ -99,50 +99,79 @@ serve(async (req) => {
               message: `[Worker ${workerIndex + 1}] Processing internal batch ${currentIndex + 1}/${batches.length} with ${batch.length} candidates...`,
             });
 
-            try {
-              const summaries = batch.map((p, localI) => ({
-                index: startIndex + localI,
-                resume: (p.resume_text || '').slice(0, 15000),
-              }));
+            // Retry logic with exponential backoff
+            let lastError: Error | null = null;
+            let retryCount = 0;
+            const maxRetries = 3;
+            let success = false;
 
-              const response = await fetch(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': apiKey as string,
-                  },
-                  body: JSON.stringify({
-                    contents: [{
-                      parts: [{
-                        text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "fullName": "...", "email": "...", "phone": "...", "location": "...", "jobTitle": "...", "yearsOfExperience": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": []}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates.`,
+            while (retryCount <= maxRetries && !success) {
+              try {
+                if (retryCount > 0) {
+                  const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
+                  sendEvent('log', {
+                    level: 'info',
+                    message: `[Worker ${workerIndex + 1}] Retry ${retryCount}/${maxRetries} for batch ${currentIndex + 1} after ${delay}ms delay...`,
+                  });
+                  await new Promise(resolve => setTimeout(resolve, delay));
+                }
+
+                const summaries = batch.map((p, localI) => ({
+                  index: startIndex + localI,
+                  resume: (p.resume_text || '').slice(0, 15000),
+                }));
+
+                const response = await fetch(
+                  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-goog-api-key': apiKey as string,
+                    },
+                    body: JSON.stringify({
+                      contents: [{
+                        parts: [{
+                          text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "fullName": "...", "email": "...", "phone": "...", "location": "...", "jobTitle": "...", "yearsOfExperience": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": []}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates.`,
+                        }],
                       }],
-                    }],
-                    generationConfig: { responseMimeType: "application/json" },
-                  }),
-                },
-              );
+                      generationConfig: { responseMimeType: "application/json" },
+                    }),
+                  },
+                );
 
-              if (!response.ok) throw new Error(`API ${response.status}`);
-              const json = await response.json();
-              const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (!rawText) throw new Error('Empty AI response');
+                const status = response.status;
+                
+                // Retry on 503 (service unavailable) or 429 (rate limit)
+                if ((status === 503 || status === 429) && retryCount < maxRetries) {
+                  lastError = new Error(`API ${status}`);
+                  retryCount++;
+                  continue;
+                }
 
-              // Clean markdown code blocks that Gemini sometimes adds
-              const cleanedText = rawText
-                .replace(/^```json\s*/, '')  // Remove starting ```json
-                .replace(/^```\s*/, '')      // Remove starting ```
-                .replace(/```$/, '')         // Remove ending ```
-                .trim();
+                if (!response.ok) {
+                  throw new Error(`API ${status}`);
+                }
 
-              const parsed = JSON.parse(cleanedText);
-              const ranked = parsed.candidates.map((c: any) => {
-                const original = batch[c.candidateIndex - summaries[0].index];
-                return { ...c, originalProfile: original };
-              });
+                const json = await response.json();
+                const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!rawText) throw new Error('Empty AI response');
 
-              allRanked.push(...ranked);
+                // Clean markdown code blocks that Gemini sometimes adds
+                const cleanedText = rawText
+                  .replace(/^```json\s*/, '')  // Remove starting ```json
+                  .replace(/^```\s*/, '')      // Remove starting ```
+                  .replace(/```$/, '')         // Remove ending ```
+                  .trim();
+
+                const parsed = JSON.parse(cleanedText);
+                const ranked = parsed.candidates.map((c: any) => {
+                  const original = batch[c.candidateIndex - summaries[0].index];
+                  return { ...c, originalProfile: original };
+                });
+
+                allRanked.push(...ranked);
+                success = true;
 
               const partialMatches = ranked.map((r: any) => ({
                 id: r.originalProfile.id,
@@ -163,19 +192,32 @@ serve(async (req) => {
                 total: profiles.length,
               });
 
+                sendEvent('log', {
+                  level: 'info',
+                  message: `[Worker ${workerIndex + 1}] Completed batch ${currentIndex + 1}/${batches.length}. Total processed: ${processedCount}/${profiles.length}.`,
+                  processed: processedCount,
+                  total: profiles.length,
+                });
+
+              } catch (err: any) {
+                lastError = err;
+                retryCount++;
+              }
+            }
+
+            // If all retries failed, use fallback
+            if (!success) {
               sendEvent('log', {
-                level: 'info',
-                message: `[Worker ${workerIndex + 1}] Completed batch ${currentIndex + 1}/${batches.length}. Total processed: ${processedCount}/${profiles.length}.`,
-                processed: processedCount,
-                total: profiles.length,
+                level: 'error',
+                message: `[Worker ${workerIndex + 1}] All retries exhausted for batch ${currentIndex + 1}. Error: ${lastError?.message || 'Unknown error'}`,
               });
-            } catch (err: any) {
+
               // FALLBACK: Return dummy objects so candidates don't disappear
               const fallbackRanked = batch.map(p => ({
                 originalProfile: p,
                 fullName: p.full_name || 'Processing Failed',
                 matchScore: 0,
-                reasoning: 'Analysis failed - manual review needed',
+                reasoning: 'Analysis failed after retries - manual review needed',
                 isFallback: true,
               }));
 
@@ -202,7 +244,7 @@ serve(async (req) => {
 
               sendEvent('log', {
                 level: 'error',
-                message: `[Worker ${workerIndex + 1}] Failed batch ${currentIndex + 1}/${batches.length}. Marking ${batch.length} candidates for manual review. Total processed: ${processedCount}/${profiles.length}.`,
+                message: `[Worker ${workerIndex + 1}] Failed batch ${currentIndex + 1}/${batches.length} after ${maxRetries} retries. Marking ${batch.length} candidates for manual review. Total processed: ${processedCount}/${profiles.length}.`,
                 processed: processedCount,
                 total: profiles.length,
               });
@@ -211,12 +253,24 @@ serve(async (req) => {
         };
 
         // Use all available API keys in parallel, with 2 workers per key continuously picking up new batches
-        await Promise.all(
-          GEMINI_KEYS.flatMap((apiKey, index) => [
-            processWithKey(apiKey as string, index * 2),
-            processWithKey(apiKey as string, index * 2 + 1),
-          ]),
-        );
+        try {
+          await Promise.all(
+            GEMINI_KEYS.flatMap((apiKey, index) => [
+              processWithKey(apiKey as string, index * 2),
+              processWithKey(apiKey as string, index * 2 + 1),
+            ]),
+          );
+
+          sendEvent('log', {
+            level: 'info',
+            message: `All workers completed. Processing results for ${allRanked.length} candidates...`,
+          });
+        } catch (workerError: any) {
+          sendEvent('log', {
+            level: 'error',
+            message: `Worker error: ${workerError.message}. Continuing with partial results...`,
+          });
+        }
 
 
         const updates = allRanked
@@ -240,7 +294,22 @@ serve(async (req) => {
             .filter(Boolean);
 
         if (updates.length) {
-            await supabaseClient.from('profiles').upsert(updates, { onConflict: 'id' });
+            sendEvent('log', {
+              level: 'info',
+              message: `Updating ${updates.length} candidate profiles in database...`,
+            });
+            const { error: updateError } = await supabaseClient.from('profiles').upsert(updates, { onConflict: 'id' });
+            if (updateError) {
+              sendEvent('log', {
+                level: 'error',
+                message: `Failed to update some profiles: ${updateError.message}`,
+              });
+            } else {
+              sendEvent('log', {
+                level: 'info',
+                message: `Successfully updated ${updates.length} profiles.`,
+              });
+            }
         }
 
         const validMatches = allRanked.map(r => ({
@@ -254,17 +323,36 @@ serve(async (req) => {
             isFallback: r.isFallback || false
         })).sort((a, b) => b.matchScore - a.matchScore);
 
+        const fallbackCount = validMatches.filter(m => m.isFallback).length;
+        const successCount = validMatches.length - fallbackCount;
+
+        sendEvent('log', {
+          level: 'info',
+          message: `Sending final results: ${successCount} successfully analyzed, ${fallbackCount} require manual review.`,
+        });
+
         sendEvent('complete', { 
             matches: validMatches, 
             total: profiles.length, 
             processed: allRanked.length,
-            message: `Successfully matched ${validMatches.length} candidates`
+            message: fallbackCount > 0 
+              ? `Matched ${successCount} candidates successfully, ${fallbackCount} require manual review`
+              : `Successfully matched all ${validMatches.length} candidates`
+        });
+
+        sendEvent('log', {
+          level: 'info',
+          message: `Processing complete. Stream closing.`,
         });
 
         controller.close();
 
       } catch (error: any) {
         sendEvent('error', { message: error.message });
+        sendEvent('log', {
+          level: 'error',
+          message: `Critical error: ${error.message}. Attempting to save partial results...`,
+        });
 
         try {
           if (allRanked.length) {
@@ -281,15 +369,36 @@ serve(async (req) => {
               isFallback: r.isFallback || false,
             })).sort((a: any, b: any) => b.matchScore - a.matchScore);
 
+            const fallbackCount = validMatches.filter((m: any) => m.isFallback).length;
+            const successCount = validMatches.length - fallbackCount;
+
+            sendEvent('log', {
+              level: 'info',
+              message: `Saving ${validMatches.length} partial results (${successCount} analyzed, ${fallbackCount} require review)...`,
+            });
+
             sendEvent('complete', {
               matches: validMatches,
               total: safeTotal,
               processed: allRanked.length,
-              message: `Completed with errors. Returned ${validMatches.length} candidates`,
+              message: `Completed with errors. Returned ${successCount} analyzed candidates and ${fallbackCount} for manual review`,
+            });
+
+            sendEvent('log', {
+              level: 'info',
+              message: `Partial results saved. Stream closing.`,
+            });
+          } else {
+            sendEvent('log', {
+              level: 'error',
+              message: `No results to save. Stream closing.`,
             });
           }
-        } catch (_finalError) {
-          // Ignore errors when sending final partial results
+        } catch (finalError: any) {
+          sendEvent('log', {
+            level: 'error',
+            message: `Failed to save partial results: ${finalError.message}`,
+          });
         }
 
         controller.close();

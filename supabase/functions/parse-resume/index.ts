@@ -154,7 +154,7 @@ serve(async (req) => {
           .replace(/[^\x00-\x7F]/g, '_') // Replace non-ASCII with underscore
           .replace(/[^a-zA-Z0-9._-]/g, '_') // Replace special chars with underscore
           .replace(/_+/g, '_'); // Replace multiple underscores with single
-        const storagePath = `resumes/${Date.now()}_${sanitizedFileName}`;
+        const storagePath = `${(await supabaseClient.auth.getUser(req.headers.get('Authorization')?.replace('Bearer ', '') || '')).data.user?.id}/${Date.now()}_${sanitizedFileName}`;
         
         const { data: uploadData, error: uploadError } = await supabaseClient.storage
           .from('resumes')

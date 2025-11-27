@@ -125,7 +125,7 @@ serve(async (req) => {
       );
     }
 
-    // Upload files to storage in parallel (background task)
+    // Upload files to storage in parallel (background task) with index tracking
     const fileUploadPromises = validFiles.map(async (file: any, index: number) => {
       const sanitizedFileName = file.name
         .normalize('NFD')
@@ -134,7 +134,7 @@ serve(async (req) => {
         .replace(/[^a-zA-Z0-9._-]/g, '_')
         .replace(/_+/g, '_');
       
-      const storagePath = `resumes/${Date.now()}_${index}_${sanitizedFileName}`;
+      const storagePath = `${user.id}/${Date.now()}_${index}_${sanitizedFileName}`;
       
       const { data, error } = await supabaseClient.storage
         .from('resumes')
@@ -152,7 +152,7 @@ serve(async (req) => {
         .from('resumes')
         .getPublicUrl(data.path);
 
-      return { fileName: file.name, fileUrl: publicUrl };
+      return { fileIndex: index, fileName: file.name, fileUrl: publicUrl };
     });
 
     // Load exactly 5 API keys for maximum parallel processing
@@ -198,7 +198,7 @@ serve(async (req) => {
       
       // Process all assigned resumes in parallel for this API
       const resumePromises = assignedFiles.map(async (file: any) => {
-        const globalFileIndex = validFiles.indexOf(file) + 1;
+        const globalFileIndex = validFiles.indexOf(file);
         
         try {
           console.log(`[RESUME ${globalFileIndex}/${validFiles.length}] ${keyName} processing "${file.name}"`);
@@ -266,8 +266,8 @@ Output format: {"candidate": {...}}`
           
           const parsedData = JSON.parse(rawText);
           if (parsedData.candidate) {
-            console.log(`[RESUME ${globalFileIndex}] ✓ Successfully parsed "${parsedData.candidate.full_name || file.name}" (${globalFileIndex}/${validFiles.length})`);
-            return parsedData.candidate;
+            console.log(`[RESUME ${globalFileIndex + 1}] ✓ Successfully parsed "${parsedData.candidate.full_name || file.name}" (${globalFileIndex + 1}/${validFiles.length})`);
+            return { ...parsedData.candidate, fileIndex: globalFileIndex };
           } else {
             console.error(`[RESUME ${globalFileIndex}] ⚠ Missing candidate object for "${file.name}"`);
             batchFailedFiles.push(file.name);
@@ -390,7 +390,7 @@ Output format: {"candidate": {...}}`
 
     const insertPromises = validCandidates.map(async (result) => {
       const { candidate, embedding } = result!;
-      const matchingUpload = uploadedFiles.find(u => u?.fileName === candidate.full_name);
+      const matchingUpload = uploadedFiles.find(u => u?.fileIndex === candidate.fileIndex);
       
       const { error: insertError } = await supabaseClient
         .from('profiles')

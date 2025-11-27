@@ -29,8 +29,8 @@ export default function Candidates() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [filteredProfiles, setFilteredProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedJobTitle, setSelectedJobTitle] = useState<string>('all');
   const [jobTitles, setJobTitles] = useState<string[]>([]);
@@ -50,11 +50,7 @@ export default function Candidates() {
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
-
-  useEffect(() => {
-    filterProfiles();
-  }, [profiles, searchTerm, selectedJobTitle, locationFilter, experienceFilter]);
+  }, [currentPage, searchTerm, selectedJobTitle, locationFilter, experienceFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -62,27 +58,76 @@ export default function Candidates() {
   }, [searchTerm, selectedJobTitle, locationFilter, experienceFilter]);
 
   const fetchProfiles = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
+      // Build the query
+      let query = supabase
         .from('profiles')
-        .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url, avatar_url, created_at, user_id, resume_text, experience')
-        .order('created_at', { ascending: false });
+        .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url, avatar_url, created_at, user_id', { count: 'exact' });
+
+      // Apply filters
+      if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        query = query.or(`full_name.ilike.%${searchLower}%,email.ilike.%${searchLower}%,phone_number.ilike.%${searchLower}%,job_title.ilike.%${searchLower}%,location.ilike.%${searchLower}%,sector.ilike.%${searchLower}%`);
+      }
+
+      if (selectedJobTitle !== 'all') {
+        query = query.eq('job_title', selectedJobTitle);
+      }
+
+      if (locationFilter !== 'all') {
+        query = query.eq('location', locationFilter);
+      }
+
+      if (experienceFilter !== 'all') {
+        if (experienceFilter === '0-2') {
+          query = query.lte('years_of_experience', 2);
+        } else if (experienceFilter === '3-5') {
+          query = query.gte('years_of_experience', 3).lte('years_of_experience', 5);
+        } else if (experienceFilter === '6-10') {
+          query = query.gte('years_of_experience', 6).lte('years_of_experience', 10);
+        } else if (experienceFilter === '10+') {
+          query = query.gt('years_of_experience', 10);
+        }
+      }
+
+      // Apply pagination and ordering
+      const from = (currentPage - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+      
+      const { data, error, count } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
 
       setProfiles((data || []) as Profile[]);
+      setTotalCount(count || 0);
       
-      // Extract unique job titles for filter
-      const uniqueTitles = Array.from(
-        new Set(data?.map(p => p.job_title).filter(Boolean) as string[])
-      );
-      setJobTitles(uniqueTitles);
+      // Fetch unique values for filters only once
+      if (jobTitles.length === 0) {
+        const { data: titlesData } = await supabase
+          .from('profiles')
+          .select('job_title')
+          .not('job_title', 'is', null);
+        
+        const uniqueTitles = Array.from(
+          new Set(titlesData?.map(p => p.job_title).filter(Boolean) as string[])
+        );
+        setJobTitles(uniqueTitles);
+      }
       
-      // Extract unique locations for filter
-      const uniqueLocations = Array.from(
-        new Set(data?.map(p => p.location).filter(Boolean) as string[])
-      );
-      setLocations(uniqueLocations);
+      if (locations.length === 0) {
+        const { data: locationsData } = await supabase
+          .from('profiles')
+          .select('location')
+          .not('location', 'is', null);
+        
+        const uniqueLocations = Array.from(
+          new Set(locationsData?.map(p => p.location).filter(Boolean) as string[])
+        );
+        setLocations(uniqueLocations);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -94,47 +139,6 @@ export default function Candidates() {
     }
   };
 
-  const filterProfiles = () => {
-    let filtered = profiles;
-
-    // Filter by search term (searches across multiple fields)
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(profile =>
-        profile.full_name?.toLowerCase().includes(searchLower) ||
-        profile.email?.toLowerCase().includes(searchLower) ||
-        profile.phone_number?.toLowerCase().includes(searchLower) ||
-        profile.job_title?.toLowerCase().includes(searchLower) ||
-        profile.location?.toLowerCase().includes(searchLower) ||
-        profile.sector?.toLowerCase().includes(searchLower) ||
-        profile.skills?.some(skill => skill.toLowerCase().includes(searchLower))
-      );
-    }
-
-    // Filter by job title
-    if (selectedJobTitle !== 'all') {
-      filtered = filtered.filter(profile => profile.job_title === selectedJobTitle);
-    }
-
-    // Filter by location
-    if (locationFilter !== 'all') {
-      filtered = filtered.filter(profile => profile.location === locationFilter);
-    }
-
-    // Filter by experience
-    if (experienceFilter !== 'all') {
-      filtered = filtered.filter(profile => {
-        const years = profile.years_of_experience || 0;
-        if (experienceFilter === '0-2') return years <= 2;
-        if (experienceFilter === '3-5') return years >= 3 && years <= 5;
-        if (experienceFilter === '6-10') return years >= 6 && years <= 10;
-        if (experienceFilter === '10+') return years > 10;
-        return true;
-      });
-    }
-
-    setFilteredProfiles(filtered);
-  };
 
   const handleViewResume = (resumeUrl: string | null) => {
     if (!resumeUrl) {
@@ -148,47 +152,76 @@ export default function Candidates() {
     window.open(resumeUrl, '_blank');
   };
 
-  const findDuplicates = () => {
+  const findDuplicates = async () => {
     setCheckingDuplicates(true);
     
-    // Find duplicates based on email or phone number
-    const duplicateMap = new Map<string, Profile[]>();
-    
-    profiles.forEach(profile => {
-      // Create a key based on email or phone (whichever exists)
-      const key = profile.email || profile.phone_number;
-      if (key) {
-        if (!duplicateMap.has(key)) {
-          duplicateMap.set(key, []);
+    try {
+      // Fetch ALL profiles from database (only needed fields for efficiency)
+      const { data: allProfiles, error } = await supabase
+        .from('profiles')
+        .select('id, email, phone_number, created_at');
+      
+      if (error) throw error;
+      
+      if (!allProfiles || allProfiles.length === 0) {
+        toast({
+          title: 'No Profiles Found',
+          description: 'No candidate profiles to check for duplicates',
+        });
+        setCheckingDuplicates(false);
+        return;
+      }
+      
+      // Find duplicates based on email or phone number
+      const duplicateMap = new Map<string, typeof allProfiles>();
+      
+      allProfiles.forEach(profile => {
+        // Create a key based on email or phone (whichever exists)
+        const key = profile.email || profile.phone_number;
+        if (key) {
+          if (!duplicateMap.has(key)) {
+            duplicateMap.set(key, []);
+          }
+          duplicateMap.get(key)!.push(profile);
         }
-        duplicateMap.get(key)!.push(profile);
-      }
-    });
-
-    // Filter out entries with only one profile (not duplicates)
-    const duplicates: string[] = [];
-    duplicateMap.forEach((profileList, key) => {
-      if (profileList.length > 1) {
-        // Sort by created_at, keep the newest one, mark others for deletion
-        const sortedProfiles = profileList.sort((a, b) => 
-          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-        );
-        // Add all except the first (newest) to the deletion list
-        sortedProfiles.slice(1).forEach(p => duplicates.push(p.id));
-      }
-    });
-
-    setDuplicateIds(duplicates);
-    setDuplicateCount(duplicates.length);
-    setCheckingDuplicates(false);
-
-    if (duplicates.length === 0) {
-      toast({
-        title: 'No Duplicates Found',
-        description: 'All candidate profiles are unique',
       });
-    } else {
-      setShowDeleteDialog(true);
+
+      // Filter out entries with only one profile (not duplicates)
+      const duplicates: string[] = [];
+      duplicateMap.forEach((profileList, key) => {
+        if (profileList.length > 1) {
+          // Sort by created_at, keep the newest one, mark others for deletion
+          const sortedProfiles = profileList.sort((a, b) => 
+            new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+          );
+          // Add all except the first (newest) to the deletion list
+          sortedProfiles.slice(1).forEach(p => duplicates.push(p.id));
+        }
+      });
+
+      setDuplicateIds(duplicates);
+      setDuplicateCount(duplicates.length);
+
+      if (duplicates.length === 0) {
+        toast({
+          title: 'No Duplicates Found',
+          description: `Checked ${allProfiles.length} profiles - all are unique`,
+        });
+      } else {
+        toast({
+          title: 'Duplicates Detected',
+          description: `Found ${duplicates.length} duplicate profiles across ${allProfiles.length} total profiles`,
+        });
+        setShowDeleteDialog(true);
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to check for duplicates',
+        variant: 'destructive',
+      });
+    } finally {
+      setCheckingDuplicates(false);
     }
   };
 
@@ -224,9 +257,7 @@ export default function Candidates() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const currentPageIds = filteredProfiles
-        .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
-        .map(p => p.id);
+      const currentPageIds = profiles.map(p => p.id);
       setSelectedCandidates(new Set(currentPageIds));
     } else {
       setSelectedCandidates(new Set());
@@ -272,8 +303,13 @@ export default function Candidates() {
     }
   };
 
-  const exportToCSV = () => {
-    const csvData = filteredProfiles.map(profile => ({
+  const exportToCSV = async () => {
+    // Fetch all profiles for export
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education');
+    
+    const csvData = (allProfiles || []).map(profile => ({
       'Name': profile.full_name || '',
       'Email': profile.email || '',
       'Phone': profile.phone_number || '',
@@ -300,12 +336,17 @@ export default function Candidates() {
 
     toast({
       title: 'Export Successful',
-      description: `Exported ${filteredProfiles.length} candidates to CSV`,
+      description: `Exported ${csvData.length} candidates to CSV`,
     });
   };
 
-  const exportToExcel = () => {
-    const excelData = filteredProfiles.map(profile => ({
+  const exportToExcel = async () => {
+    // Fetch all profiles for export
+    const { data: allProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url');
+    
+    const excelData = (allProfiles || []).map(profile => ({
       'Name': profile.full_name || '',
       'Email': profile.email || '',
       'Phone': profile.phone_number || '',
@@ -333,7 +374,7 @@ export default function Candidates() {
 
     toast({
       title: 'Export Successful',
-      description: `Exported ${filteredProfiles.length} candidates to Excel`,
+      description: `Exported ${excelData.length} candidates to Excel`,
     });
   };
 
@@ -366,7 +407,7 @@ export default function Candidates() {
             <Button
               variant="outline"
               onClick={exportToCSV}
-              disabled={filteredProfiles.length === 0}
+              disabled={totalCount === 0}
               className="gap-2"
             >
               <Download className="h-4 w-4" />
@@ -375,7 +416,7 @@ export default function Candidates() {
             <Button
               variant="outline"
               onClick={exportToExcel}
-              disabled={filteredProfiles.length === 0}
+              disabled={totalCount === 0}
               className="gap-2"
             >
               <FileSpreadsheet className="h-4 w-4" />
@@ -384,7 +425,7 @@ export default function Candidates() {
             <Button
               variant="destructive"
               onClick={findDuplicates}
-              disabled={checkingDuplicates || profiles.length === 0}
+              disabled={checkingDuplicates || totalCount === 0}
               className="gap-2"
             >
               <Trash2 className="h-4 w-4" />
@@ -488,8 +529,7 @@ export default function Candidates() {
           
           <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm text-muted-foreground">
             <span>
-              Showing {Math.min(currentPage * ITEMS_PER_PAGE, filteredProfiles.length)} of {filteredProfiles.length} candidates
-              {filteredProfiles.length !== profiles.length && ` (${profiles.length} total)`}
+              Showing {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} of {totalCount} candidates
             </span>
             {selectedCandidates.size > 0 && (
               <span className="font-medium text-primary">
@@ -505,7 +545,7 @@ export default function Candidates() {
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
             <p className="mt-4 text-muted-foreground">Loading candidates...</p>
           </div>
-        ) : filteredProfiles.length === 0 ? (
+        ) : profiles.length === 0 ? (
           <Card className="p-12 text-center">
             <FileText className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
             <h3 className="text-xl font-semibold mb-2">No Candidates Found</h3>
@@ -518,16 +558,14 @@ export default function Candidates() {
         ) : (
           <>
             {/* Bulk Select Header */}
-            {filteredProfiles.length > 0 && (
+            {profiles.length > 0 && (
               <Card className="p-4 mb-4 bg-muted/50">
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="select-all"
                     checked={
                       selectedCandidates.size > 0 &&
-                      filteredProfiles
-                        .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
-                        .every(p => selectedCandidates.has(p.id))
+                      profiles.every(p => selectedCandidates.has(p.id))
                     }
                     onCheckedChange={handleSelectAll}
                   />
@@ -539,9 +577,7 @@ export default function Candidates() {
             )}
             
             <div className="grid gap-4">
-              {filteredProfiles
-                .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
-                .map((profile) => (
+              {profiles.map((profile) => (
               <Card
                 key={profile.id}
                 className="p-6 hover:shadow-lg transition-all duration-300 bg-card/50 backdrop-blur-sm border-2 hover:border-primary/50"
@@ -639,8 +675,8 @@ export default function Candidates() {
             </div>
             
             {/* Pagination */}
-            {filteredProfiles.length > ITEMS_PER_PAGE && (() => {
-              const totalPages = Math.ceil(filteredProfiles.length / ITEMS_PER_PAGE);
+            {totalCount > ITEMS_PER_PAGE && (() => {
+              const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
               const getPageNumbers = () => {
                 const pages = [];
                 const showMax = 7; // Maximum pages to show

@@ -40,39 +40,73 @@ Return ONLY a JSON array of the relevant job titles (exact strings from the list
 
 Example format: ["Software Engineer", "Senior Software Engineer", "Software Developer"]`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2000,
+    // Retry logic with exponential backoff
+    let lastError;
+    const maxRetries = 3;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{ text: prompt }]
+              }],
+              generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: 2000,
+              }
+            })
           }
-        })
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Gemini API error (attempt ${attempt + 1}):`, response.status, errorText);
+          
+          // Retry on 503 (Service Unavailable) and 429 (Rate Limit)
+          if ((response.status === 503 || response.status === 429) && attempt < maxRetries - 1) {
+            lastError = new Error(`Gemini API temporarily unavailable (${response.status})`);
+            continue;
+          }
+          
+          throw new Error(`Gemini API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        let textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+
+        // Clean up markdown code blocks if present
+        textResponse = textResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+        const suggestedTitles = JSON.parse(textResponse);
+
+        return new Response(
+          JSON.stringify({ suggestedTitles }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (error) {
+        // If it's not a fetch/network error, throw immediately
+        if (!(error instanceof Error) || !error.message.includes('Gemini API')) {
+          throw error;
+        }
+        lastError = error;
+        if (attempt === maxRetries - 1) {
+          throw error;
+        }
       }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status}`);
     }
-
-    const data = await response.json();
-    let textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-
-    // Clean up markdown code blocks if present
-    textResponse = textResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-    const suggestedTitles = JSON.parse(textResponse);
-
-    return new Response(
-      JSON.stringify({ suggestedTitles }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    
+    throw lastError || new Error('Failed after retries');
 
   } catch (error) {
     console.error('Error in suggest-job-titles:', error);

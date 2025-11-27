@@ -45,8 +45,8 @@ const Index = () => {
           const { data, error } = await supabase
             .from('profiles')
             .select('full_name, avatar_url')
-            .eq('id', user.id)
-            .single();
+            .eq('user_id', user.id)
+            .maybeSingle();
 
           // Ignore errors during sign out
           if (error && !error.message.includes('JWT')) {
