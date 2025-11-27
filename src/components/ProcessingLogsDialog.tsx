@@ -92,31 +92,31 @@ export const ProcessingLogsDialog: React.FC<ProcessingLogsDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(open) => !open && (isComplete || hasError) && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[80vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="max-w-[95vw] sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-4 sm:p-6">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
             {!isComplete && !hasError && (
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary flex-shrink-0" />
             )}
             {isComplete && !hasError && (
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
             )}
-            {hasError && <XCircle className="h-5 w-5 text-destructive" />}
-            Processing Candidates
+            {hasError && <XCircle className="h-5 w-5 text-destructive flex-shrink-0" />}
+            <span className="truncate">Processing Candidates</span>
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">
             {status}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex-1 min-h-0 space-y-3 sm:space-y-4 overflow-y-auto">
           <div className="space-y-2">
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-xs sm:text-sm gap-2">
               <span className="text-muted-foreground">Progress</span>
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{Math.round(progress)}%</span>
+              <div className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
+                <span className="font-medium whitespace-nowrap">{Math.round(progress)}%</span>
                 {estimatedTimeRemaining && estimatedTimeRemaining > 0 && !isComplete && (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
                     ~{estimatedTimeRemaining}s remaining
                   </span>
                 )}
@@ -126,41 +126,41 @@ export const ProcessingLogsDialog: React.FC<ProcessingLogsDialogProps> = ({
           </div>
 
           {hasError && (
-            <Alert variant="destructive">
-              <XCircle className="h-4 w-4" />
+            <Alert variant="destructive" className="text-xs sm:text-sm">
+              <XCircle className="h-4 w-4 flex-shrink-0" />
               <AlertDescription>
                 An error occurred during processing. Check the logs below for details.
               </AlertDescription>
             </Alert>
           )}
 
-          <div className="border rounded-lg bg-muted/50">
-            <div className="flex items-center justify-between p-3 border-b bg-muted/30">
-              <span className="text-sm font-medium text-muted-foreground">Processing Logs</span>
-              <div className="flex gap-2">
+          <div className="border rounded-lg bg-muted/50 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-2 sm:p-3 border-b bg-muted/30 flex-shrink-0">
+              <span className="text-xs sm:text-sm font-medium text-muted-foreground">Processing Logs</span>
+              <div className="flex gap-1 sm:gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={copyLogsToClipboard}
                   disabled={logs.length === 0}
-                  className="h-8 gap-2"
+                  className="h-7 sm:h-8 gap-1 sm:gap-2 text-xs"
                 >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy
+                  <Copy className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span className="hidden sm:inline">Copy</span>
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={downloadLogs}
                   disabled={logs.length === 0}
-                  className="h-8 gap-2"
+                  className="h-7 sm:h-8 gap-1 sm:gap-2 text-xs"
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  Download
+                  <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span className="hidden sm:inline">Download</span>
                 </Button>
               </div>
             </div>
-            <ScrollArea className="h-[300px] p-4" ref={scrollRef}>
+            <ScrollArea className="h-[200px] sm:h-[250px] lg:h-[300px] p-3 sm:p-4" ref={scrollRef}>
               <div className="space-y-2 font-mono text-xs">
                 {logs.length === 0 ? (
                   <div className="text-muted-foreground text-center py-8">
@@ -203,14 +203,14 @@ export const ProcessingLogsDialog: React.FC<ProcessingLogsDialogProps> = ({
           </div>
 
           {(isComplete || hasError) ? (
-            <div className="flex justify-end pt-4 border-t">
-              <Button onClick={onClose} variant="default">
+            <div className="flex justify-end pt-3 sm:pt-4 border-t flex-shrink-0">
+              <Button onClick={onClose} variant="default" className="w-full sm:w-auto">
                 Close
               </Button>
             </div>
           ) : onCancel ? (
-            <div className="flex justify-end pt-4 border-t">
-              <Button onClick={onCancel} variant="destructive">
+            <div className="flex justify-end pt-3 sm:pt-4 border-t flex-shrink-0">
+              <Button onClick={onCancel} variant="destructive" className="w-full sm:w-auto">
                 Cancel Upload
               </Button>
             </div>
