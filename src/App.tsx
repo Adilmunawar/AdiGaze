@@ -9,6 +9,7 @@ import Settings from "./pages/Settings";
 import Bookmarks from "./pages/Bookmarks";
 import SearchHistory from "./pages/SearchHistory";
 import Candidates from "./pages/Candidates";
+import RecentResumes from "./pages/RecentResumes";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/bookmarks" element={<Bookmarks />} />
           <Route path="/history" element={<SearchHistory />} />
           <Route path="/candidates" element={<Candidates />} />
+          <Route path="/recent-resumes" element={<RecentResumes />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -44,43 +44,75 @@ ${jobDescription}
 
 Return ONLY the enhanced job description text. No explanations, preambles, or markdown formatting.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 3000,
-          }
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API error:', response.status, errorText);
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log('Gemini API response:', JSON.stringify(data, null, 2));
+    // Retry logic with exponential backoff
+    let lastError;
+    const maxRetries = 3;
+    let enhancedDescription = '';
     
-    let enhancedDescription = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
 
-    // Clean up any markdown formatting
-    enhancedDescription = enhancedDescription.replace(/```\s*/g, '').trim();
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{ text: prompt }]
+              }],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 3000,
+              }
+            })
+          }
+        );
 
-    if (!enhancedDescription) {
-      console.error('Empty response from Gemini API');
-      throw new Error('No enhanced description received from AI');
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Gemini API error (attempt ${attempt + 1}):`, response.status, errorText);
+          
+          // Retry on 503 (Service Unavailable) and 429 (Rate Limit)
+          if ((response.status === 503 || response.status === 429) && attempt < maxRetries - 1) {
+            lastError = new Error(`Gemini API temporarily unavailable (${response.status})`);
+            continue;
+          }
+          
+          throw new Error(`Gemini API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('Gemini API response:', JSON.stringify(data, null, 2));
+        
+        enhancedDescription = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        // Clean up any markdown formatting
+        enhancedDescription = enhancedDescription.replace(/```\s*/g, '').trim();
+
+        if (!enhancedDescription) {
+          console.error('Empty response from Gemini API');
+          throw new Error('No enhanced description received from AI');
+        }
+
+        console.log('Enhanced description length:', enhancedDescription.length);
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === maxRetries - 1) {
+          throw error;
+        }
+        // Only retry on specific errors
+        if (error instanceof Error && !error.message.includes('temporarily unavailable')) {
+          throw error;
+        }
+      }
     }
-
-    console.log('Enhanced description length:', enhancedDescription.length);
 
     return new Response(
       JSON.stringify({ enhancedDescription }),

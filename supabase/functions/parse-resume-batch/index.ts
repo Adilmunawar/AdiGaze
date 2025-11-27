@@ -60,6 +60,32 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(base64);
 }
 
+function deriveNameFromEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const localPart = email.split('@')[0];
+  let cleaned = localPart
+    .replace(/[0-9_.-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length < 3) return null;
+
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (!parts.length) return null;
+
+  const name = parts
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(' ');
+
+  return name;
+}
+
+function isPlaceholderName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  return ['unknown', 'n/a', 'not found', 'not specified', 'na', 'none'].includes(lower);
+}
+
 serve(async (req) => {
   console.log('=== REQUEST RECEIVED ===');
   
@@ -125,7 +151,7 @@ serve(async (req) => {
       );
     }
 
-    // Upload files to storage in parallel (background task)
+    // Upload files to storage in parallel (background task) with index tracking
     const fileUploadPromises = validFiles.map(async (file: any, index: number) => {
       const sanitizedFileName = file.name
         .normalize('NFD')
@@ -134,7 +160,7 @@ serve(async (req) => {
         .replace(/[^a-zA-Z0-9._-]/g, '_')
         .replace(/_+/g, '_');
       
-      const storagePath = `resumes/${Date.now()}_${index}_${sanitizedFileName}`;
+      const storagePath = `${user.id}/${Date.now()}_${index}_${sanitizedFileName}`;
       
       const { data, error } = await supabaseClient.storage
         .from('resumes')
@@ -152,7 +178,7 @@ serve(async (req) => {
         .from('resumes')
         .getPublicUrl(data.path);
 
-      return { fileName: file.name, fileUrl: publicUrl };
+      return { fileIndex: index, fileName: file.name, fileUrl: publicUrl };
     });
 
     // Load exactly 5 API keys for maximum parallel processing
@@ -198,7 +224,7 @@ serve(async (req) => {
       
       // Process all assigned resumes in parallel for this API
       const resumePromises = assignedFiles.map(async (file: any) => {
-        const globalFileIndex = validFiles.indexOf(file) + 1;
+        const globalFileIndex = validFiles.indexOf(file);
         
         try {
           console.log(`[RESUME ${globalFileIndex}/${validFiles.length}] ${keyName} processing "${file.name}"`);
@@ -217,15 +243,22 @@ serve(async (req) => {
                       {
                         text: `Extract data from this single resume. Return ONLY valid JSON.
 
+CRITICAL RULES:
+- full_name: Extract the ACTUAL person's name from the resume. DO NOT use placeholders like "Unknown", "N/A", or the filename. If you cannot find a real name, set this field to null.
+- If any field is not found in the resume, set it to null (not "Unknown", "N/A", or any placeholder text)
+
 EXTRACT:
-- full_name (MUST be person's real name from resume, NOT filename)
-- email, phone_number, location, job_title
-- years_of_experience (integer)
-- sector
-- skills (array, max 10)
-- experience (max 200 chars)
-- education (max 150 chars)
-- resume_text (FULL raw text content from resume for AI matching)
+- full_name (string or null - MUST be the person's real name from the resume)
+- email (string or null)
+- phone_number (string or null)
+- location (string or null)
+- job_title (string or null)
+- years_of_experience (integer or null)
+- sector (string or null)
+- skills (array of strings, empty array if none found)
+- experience (string or null, max 200 chars)
+- education (string or null, max 150 chars)
+- resume_text (string - FULL raw text content from resume for AI matching)
 
 Output format: {"candidate": {...}}`
                       },
@@ -266,8 +299,23 @@ Output format: {"candidate": {...}}`
           
           const parsedData = JSON.parse(rawText);
           if (parsedData.candidate) {
-            console.log(`[RESUME ${globalFileIndex}] ✓ Successfully parsed "${parsedData.candidate.full_name || file.name}" (${globalFileIndex}/${validFiles.length})`);
-            return parsedData.candidate;
+            const candidate = parsedData.candidate;
+
+            // Fallback: derive a human-readable name from email if AI did not return one
+            if (!candidate.full_name && candidate.email) {
+              const derivedName = deriveNameFromEmail(candidate.email);
+              if (derivedName && !isPlaceholderName(derivedName)) {
+                candidate.full_name = derivedName;
+              }
+            }
+
+            // Ensure we never persist obvious placeholder names
+            if (isPlaceholderName(candidate.full_name)) {
+              candidate.full_name = null;
+            }
+
+            console.log(`[RESUME ${globalFileIndex + 1}] ✓ Successfully parsed "${candidate.full_name || file.name}" (${globalFileIndex + 1}/${validFiles.length})`);
+            return { ...candidate, fileIndex: globalFileIndex };
           } else {
             console.error(`[RESUME ${globalFileIndex}] ⚠ Missing candidate object for "${file.name}"`);
             batchFailedFiles.push(file.name);
@@ -368,10 +416,13 @@ Output format: {"candidate": {...}}`
       const { candidate } = result;
       
       // Only require full_name - allow other fields to be null/empty
-      const hasMinimumFields = candidate.full_name && candidate.full_name.trim().length > 0;
+      // Also reject if name is a placeholder like "Unknown"
+      const hasMinimumFields = !!candidate.full_name && 
+                              candidate.full_name.trim().length > 0 &&
+                              !isPlaceholderName(candidate.full_name);
       
       if (!hasMinimumFields) {
-        console.warn(`[VALIDATION] Rejected candidate: ${candidate.full_name || 'UNKNOWN'} - Missing name`);
+        console.warn(`[VALIDATION] Rejected candidate: ${candidate.full_name || 'UNKNOWN'} - Invalid or missing name`);
       } else {
         // Log warning for incomplete data but still process
         const missingFields = [];
@@ -390,7 +441,7 @@ Output format: {"candidate": {...}}`
 
     const insertPromises = validCandidates.map(async (result) => {
       const { candidate, embedding } = result!;
-      const matchingUpload = uploadedFiles.find(u => u?.fileName === candidate.full_name);
+      const matchingUpload = uploadedFiles.find(u => u?.fileIndex === candidate.fileIndex);
       
       const { error: insertError } = await supabaseClient
         .from('profiles')

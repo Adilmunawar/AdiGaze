@@ -6,12 +6,13 @@ import { ApiUsageStats } from '@/components/ApiUsageStats';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Users, Upload, LogOut, Bookmark, History, Settings, Activity } from 'lucide-react';
+import { Users, Upload, LogOut, Bookmark, History, Settings, Activity, Clock } from 'lucide-react';
 import adiGazeLogo from '@/assets/adigaze-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import Footer from '@/components/Footer';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const Index = () => {
   const { user, loading, signOut } = useAuth();
@@ -45,8 +46,8 @@ const Index = () => {
           const { data, error } = await supabase
             .from('profiles')
             .select('full_name, avatar_url')
-            .eq('id', user.id)
-            .single();
+            .eq('user_id', user.id)
+            .maybeSingle();
 
           // Ignore errors during sign out
           if (error && !error.message.includes('JWT')) {
@@ -81,6 +82,11 @@ const Index = () => {
 
   return (
     <div className="min-h-screen relative overflow-hidden animate-fade-in flex flex-col">
+      {/* Notification Bell - Top Right Corner */}
+      <div className="absolute top-4 right-4 z-50">
+        <NotificationBell />
+      </div>
+
       {/* Animated Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
         <div className="absolute inset-0 bg-mesh" />
@@ -151,38 +157,29 @@ const Index = () => {
         <Tabs defaultValue="upload" className="space-y-10">
           <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-6">
             <TabsList className="grid w-full md:w-auto grid-cols-3 h-11 bg-card/60 backdrop-blur-md border border-primary/30 shadow-[var(--shadow-card)] md:min-w-[600px]">
-              <TabsTrigger 
-                value="upload" 
-                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
-              >
-                <Upload className="h-4 w-4" />
-                Upload Resumes
-              </TabsTrigger>
-              <TabsTrigger 
-                value="hunt" 
-                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-secondary data-[state=active]:to-accent data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
-              >
-                <Users className="h-4 w-4" />
-                Find Candidates
-              </TabsTrigger>
-              <TabsTrigger 
-                value="stats" 
-                className="gap-2 text-sm data-[state=active]:bg-gradient-to-r data-[state=active]:from-accent data-[state=active]:to-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[var(--shadow-elegant)] transition-all duration-300"
-              >
-                <Activity className="h-4 w-4" />
-                Live Stats
-              </TabsTrigger>
+...
             </TabsList>
             
-            <Button
-              onClick={() => navigate('/candidates')}
-              variant="outline"
-              size="lg"
-              className="w-full md:w-auto gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
-            >
-              <Users className="h-5 w-5" />
-              View All Candidates
-            </Button>
+            <div className="flex gap-3 w-full md:w-auto">
+              <Button
+                onClick={() => navigate('/candidates')}
+                variant="outline"
+                size="lg"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+              >
+                <Users className="h-5 w-5" />
+                View All Candidates
+              </Button>
+              <Button
+                onClick={() => navigate('/recent-resumes')}
+                variant="outline"
+                size="lg"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-secondary/10 border-secondary/40 hover:border-secondary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+              >
+                <Clock className="h-5 w-5" />
+                Recent Resumes
+              </Button>
+            </div>
           </div>
 
           <TabsContent value="upload" className="space-y-6 animate-fade-in">

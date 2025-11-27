@@ -164,7 +164,7 @@ export const CandidateHunting = () => {
         reasoning: c.reasoning,
         strengths: c.key_strengths || [],
         concerns: c.potential_concerns || [],
-      }));
+      })).sort((a, b) => b.matchScore - a.matchScore);
 
       setJobDescription(searchData.job_description);
       setMatches(formattedMatches);
@@ -219,7 +219,7 @@ export const CandidateHunting = () => {
         reasoning: c.reasoning,
         strengths: c.key_strengths || [],
         concerns: c.potential_concerns || [],
-      }));
+      })).sort((a, b) => b.matchScore - a.matchScore);
 
       setJobDescription(searchData.job_description);
       setMatches(formattedMatches);
@@ -594,7 +594,8 @@ export const CandidateHunting = () => {
       }
     }
 
-    return Array.from(map.values());
+    // Sort by matchScore descending (highest match first)
+    return Array.from(map.values()).sort((a, b) => b.matchScore - a.matchScore);
   };
 
   const runMatchingChunk = async (
@@ -880,7 +881,7 @@ export const CandidateHunting = () => {
         experience_years: match.years_of_experience !== null
           ? Math.round(match.years_of_experience)
           : null,
-        match_score: match.matchScore,
+        match_score: Math.round(match.matchScore),
         reasoning: match.reasoning,
         key_strengths: match.strengths || [],
         potential_concerns: match.concerns || [],
@@ -902,7 +903,9 @@ export const CandidateHunting = () => {
       setSearchStatus('Search completed successfully');
       setProcessingComplete(true);
 
-      setMatches(allMatches);
+      // Sort matches by score descending to ensure highest matches appear first
+      const sortedMatches = [...allMatches].sort((a, b) => b.matchScore - a.matchScore);
+      setMatches(sortedMatches);
       setTotalCandidates(totalCandidatesFound);
       setCurrentSearchId(searchData.id);
       setCurrentPage(1);
