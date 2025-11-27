@@ -107,7 +107,7 @@ const RecentResumes = () => {
           <Button
             variant="outline"
             onClick={() => navigate('/')}
-            className="gap-2 mb-6 bg-card/60 backdrop-blur-sm hover:bg-primary/10 border-primary/40"
+            className="gap-2 mb-6 bg-card/60 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground border-primary/40 hover:border-primary transition-all duration-300"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to Dashboard
@@ -164,7 +164,7 @@ const RecentResumes = () => {
                         variant="outline"
                         size="sm"
                         onClick={() => handleViewResume(resume.resume_file_url!)}
-                        className="flex-shrink-0 gap-2 hover:bg-primary/10 hover:text-primary hover:border-primary/40"
+                        className="flex-shrink-0 gap-2 hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all duration-300"
                       >
                         <ExternalLink className="h-4 w-4" />
                         View Resume

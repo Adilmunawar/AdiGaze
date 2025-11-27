@@ -19,7 +19,7 @@ const Footer = () => {
             onClick={handleSupportClick}
             variant="outline"
             size="sm"
-            className="gap-2 hover:bg-primary/10 border-primary/30"
+            className="gap-2 hover:bg-primary hover:text-primary-foreground border-primary/30 hover:border-primary transition-all duration-300"
           >
             <MessageCircle className="h-4 w-4" />
             Support this Project

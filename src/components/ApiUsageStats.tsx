@@ -298,7 +298,7 @@ export const ApiUsageStats = () => {
               size="sm"
               className={timeRange === range ? 
                 'bg-gradient-to-r from-primary to-secondary text-primary-foreground shadow-[var(--shadow-elegant)]' : 
-                'bg-card/60 backdrop-blur-sm border-primary/30 hover:bg-accent/10'
+                'bg-card/60 backdrop-blur-sm border-primary/30 hover:bg-accent hover:text-accent-foreground transition-all duration-300'
               }
             >
               {range}

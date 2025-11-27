@@ -303,42 +303,6 @@ export default function Candidates() {
     }
   };
 
-  const exportToCSV = async () => {
-    // Fetch all profiles for export
-    const { data: allProfiles } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education');
-    
-    const csvData = (allProfiles || []).map(profile => ({
-      'Name': profile.full_name || '',
-      'Email': profile.email || '',
-      'Phone': profile.phone_number || '',
-      'Location': profile.location || '',
-      'Job Title': profile.job_title || '',
-      'Experience (Years)': profile.years_of_experience || 0,
-      'Sector': profile.sector || '',
-      'Skills': profile.skills?.join(', ') || '',
-      'Education': profile.education || '',
-    }));
-
-    const csv = [
-      Object.keys(csvData[0]).join(','),
-      ...csvData.map(row => Object.values(row).map(val => `"${val}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `candidates_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-
-    toast({
-      title: 'Export Successful',
-      description: `Exported ${csvData.length} candidates to CSV`,
-    });
-  };
 
   const exportToExcel = async () => {
     // Fetch all profiles for export
@@ -404,15 +368,6 @@ export default function Candidates() {
                 Delete Selected ({selectedCandidates.size})
               </Button>
             )}
-            <Button
-              variant="outline"
-              onClick={exportToCSV}
-              disabled={totalCount === 0}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </Button>
             <Button
               variant="outline"
               onClick={exportToExcel}

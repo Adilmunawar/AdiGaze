@@ -136,7 +136,7 @@ const Index = () => {
                 variant="outline"
                 size="default"
                 onClick={() => navigate('/bookmarks')}
-                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-primary/10 border-primary/40 hover:border-primary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground border-primary/40 hover:border-primary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <Bookmark className="h-4 w-4" />
                 My Bookmarks
@@ -145,7 +145,7 @@ const Index = () => {
                 variant="outline"
                 size="default"
                 onClick={() => navigate('/history')}
-                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-secondary/10 border-secondary/40 hover:border-secondary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-secondary hover:text-secondary-foreground border-secondary/40 hover:border-secondary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <History className="h-4 w-4" />
                 Search History
@@ -185,7 +185,7 @@ const Index = () => {
                 onClick={() => navigate('/candidates')}
                 variant="outline"
                 size="lg"
-                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent hover:text-accent-foreground border-accent/40 hover:border-accent shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
               >
                 <Users className="h-5 w-5" />
                 View All Candidates
@@ -194,7 +194,7 @@ const Index = () => {
                 onClick={() => navigate('/recent-resumes')}
                 variant="outline"
                 size="lg"
-                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-secondary/10 border-secondary/40 hover:border-secondary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-secondary hover:text-secondary-foreground border-secondary/40 hover:border-secondary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
               >
                 <Clock className="h-5 w-5" />
                 Recent Resumes

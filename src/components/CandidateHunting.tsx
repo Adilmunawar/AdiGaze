@@ -291,7 +291,7 @@ export const CandidateHunting = () => {
     }
   };
 
-  const exportToCSV = () => {
+  const exportToExcel = async () => {
     if (matches.length === 0) {
       toast({
         title: 'No Data to Export',
@@ -301,67 +301,38 @@ export const CandidateHunting = () => {
       return;
     }
 
-    // Create CSV headers
-    const headers = [
-      'Rank',
-      'Full Name',
-      'Email',
-      'Phone Number',
-      'Location',
-      'Job Title',
-      'Years of Experience',
-      'Match %',
-      'Key Strengths',
-      'Potential Concerns',
-      'Reasoning',
-      'Resume URL'
-    ];
+    const excelData = matches.map((candidate, index) => ({
+      'Rank': index + 1,
+      'Full Name': candidate.full_name || '',
+      'Email': candidate.email || '',
+      'Phone Number': candidate.phone_number || '',
+      'Location': candidate.location || '',
+      'Job Title': candidate.job_title || '',
+      'Years of Experience': candidate.years_of_experience || '',
+      'Match %': candidate.matchScore,
+      'Key Strengths': candidate.strengths.join('; '),
+      'Potential Concerns': candidate.concerns.join('; '),
+      'Reasoning': candidate.reasoning || '',
+      'Resume URL': candidate.resume_file_url || ''
+    }));
 
-    // Create CSV rows
-    const rows = matches.map((candidate, index) => [
-      index + 1,
-      candidate.full_name || '',
-      candidate.email || '',
-      candidate.phone_number || '',
-      candidate.location || '',
-      candidate.job_title || '',
-      candidate.years_of_experience || '',
-      candidate.matchScore,
-      candidate.strengths.join('; '),
-      candidate.concerns.join('; '),
-      candidate.reasoning || '',
-      candidate.resume_file_url || ''
-    ]);
-
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => {
-        // Escape commas and quotes in cell content
-        const cellStr = String(cell);
-        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
-          return `"${cellStr.replace(/"/g, '""')}"`;
-        }
-        return cellStr;
-      }).join(','))
-    ].join('\n');
-
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
+    const XLSX = await import('xlsx');
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Candidate Matches');
     
-    link.setAttribute('href', url);
-    link.setAttribute('download', `candidate_matches_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Auto-size columns
+    const maxWidth = 50;
+    const colWidths = Object.keys(excelData[0] || {}).map(key => ({
+      wch: Math.min(maxWidth, Math.max(key.length, ...excelData.map(row => String(row[key as keyof typeof row]).length)))
+    }));
+    ws['!cols'] = colWidths;
+
+    XLSX.writeFile(wb, `candidate_matches_${new Date().toISOString().split('T')[0]}.xlsx`);
 
     toast({
-      title: 'CSV Exported Successfully',
-      description: `Exported ${matches.length} candidates to CSV`,
+      title: 'Excel Exported Successfully',
+      description: `Exported ${matches.length} candidates to Excel`,
     });
   };
 
@@ -1112,23 +1083,23 @@ export const CandidateHunting = () => {
                 <Button
                   onClick={cleanDuplicates}
                   variant="outline"
-                  className="flex items-center gap-2 bg-gradient-to-r from-accent/10 to-accent/20 hover:from-accent/20 hover:to-accent/30 border-accent/30"
+                  className="flex items-center gap-2 bg-accent/5 hover:bg-accent hover:text-accent-foreground border-accent/30 hover:border-accent transition-all duration-300"
                 >
                   <Trash2 className="h-4 w-4" />
                   Clean Duplicates
                 </Button>
                 <Button
-                  onClick={exportToCSV}
+                  onClick={exportToExcel}
                   variant="outline"
-                  className="flex items-center gap-2 bg-gradient-to-r from-primary/10 to-secondary/10 hover:from-primary/20 hover:to-secondary/20 border-primary/30"
+                  className="flex items-center gap-2 bg-primary/5 hover:bg-primary hover:text-primary-foreground border-primary/30 hover:border-primary transition-all duration-300"
                 >
                   <Download className="h-4 w-4" />
-                  Export to CSV
+                  Export to Excel
                 </Button>
                 <Button
                   onClick={handleClearResults}
                   variant="outline"
-                  className="flex items-center gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+                  className="flex items-center gap-2 border-destructive/30 text-destructive hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-all duration-300"
                 >
                   <X className="h-4 w-4" />
                   Clear Results

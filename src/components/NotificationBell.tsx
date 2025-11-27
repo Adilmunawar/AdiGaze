@@ -144,7 +144,7 @@ export const NotificationBell = () => {
         <Button
           variant="ghost"
           size="icon"
-          className="relative hover:bg-primary/10 hover:text-primary transition-colors"
+          className="relative hover:bg-primary hover:text-primary-foreground transition-all duration-300"
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
@@ -163,7 +163,7 @@ export const NotificationBell = () => {
                 variant="ghost"
                 size="sm"
                 onClick={markAllAsRead}
-                className="h-7 gap-1 text-xs hover:bg-primary/10 hover:text-primary"
+                className="h-7 gap-1 text-xs hover:bg-primary hover:text-primary-foreground transition-all duration-300"
               >
                 <CheckCheck className="h-3 w-3" />
                 Mark all read
@@ -185,7 +185,7 @@ export const NotificationBell = () => {
               {notifications.map((notification) => (
                 <div
                   key={notification.id}
-                  className={`p-3 rounded-lg hover:bg-accent/10 transition-colors mb-2 border border-transparent hover:border-primary/20 ${
+                  className={`p-3 rounded-lg hover:bg-accent hover:text-accent-foreground transition-all duration-300 mb-2 border border-transparent hover:border-primary/40 ${
                     !notification.read ? 'bg-primary/5' : ''
                   }`}
                 >
