@@ -130,10 +130,17 @@ serve(async (req) => {
                     body: JSON.stringify({
                       contents: [{
                         parts: [{
+<<<<<<< HEAD
                           text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": [], "company": ""}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates with their match scores.`,
                         }],
                       }],
                       generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
+=======
+                          text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "fullName": "...", "email": "...", "phone": "...", "location": "...", "jobTitle": "...", "yearsOfExperience": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": []}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates.`,
+                        }],
+                      }],
+                      generationConfig: { responseMimeType: "application/json" },
+>>>>>>> 0979ce7837357f9add28a521613aa47a4707a507
                     }),
                   },
                 );
@@ -161,6 +168,18 @@ serve(async (req) => {
                   .replace(/^```\s*/, '')      // Remove starting ```
                   .replace(/```$/, '')         // Remove ending ```
                   .trim();
+<<<<<<< HEAD
+=======
+
+                const parsed = JSON.parse(cleanedText);
+                const ranked = parsed.candidates.map((c: any) => {
+                  const original = batch[c.candidateIndex - summaries[0].index];
+                  return { ...c, originalProfile: original };
+                });
+
+                allRanked.push(...ranked);
+                success = true;
+>>>>>>> 0979ce7837357f9add28a521613aa47a4707a507
 
                 const parsed = JSON.parse(cleanedText);
                 const ranked = parsed.candidates.map((c: any) => {
@@ -175,6 +194,7 @@ serve(async (req) => {
                 const partialMatches = ranked.map((r: any) => {
                   const p = r.originalProfile;
 
+<<<<<<< HEAD
                   return {
                     id: p.id,
                     full_name: p.full_name,
@@ -201,6 +221,8 @@ serve(async (req) => {
                   total: profiles.length,
                 });
 
+=======
+>>>>>>> 0979ce7837357f9add28a521613aa47a4707a507
                 sendEvent('log', {
                   level: 'info',
                   message: `[Worker ${workerIndex + 1}] Completed batch ${currentIndex + 1}/${batches.length}. Total processed: ${processedCount}/${profiles.length}.`,
@@ -221,7 +243,11 @@ serve(async (req) => {
                 message: `[Worker ${workerIndex + 1}] All retries exhausted for batch ${currentIndex + 1}. Error: ${lastError?.message || 'Unknown error'}`,
               });
 
+<<<<<<< HEAD
               // FALLBACK: Use original profile data
+=======
+              // FALLBACK: Return dummy objects so candidates don't disappear
+>>>>>>> 0979ce7837357f9add28a521613aa47a4707a507
               const fallbackRanked = batch.map(p => ({
                 originalProfile: p,
                 matchScore: 0,
@@ -278,6 +304,7 @@ serve(async (req) => {
               processWithKey(apiKey as string, index * 2 + 1),
             ]),
           );
+<<<<<<< HEAD
 
           sendEvent('log', {
             level: 'info',
@@ -288,6 +315,58 @@ serve(async (req) => {
             level: 'error',
             message: `Worker error: ${workerError.message}. Continuing with partial results...`,
           });
+=======
+
+          sendEvent('log', {
+            level: 'info',
+            message: `All workers completed. Processing results for ${allRanked.length} candidates...`,
+          });
+        } catch (workerError: any) {
+          sendEvent('log', {
+            level: 'error',
+            message: `Worker error: ${workerError.message}. Continuing with partial results...`,
+          });
+        }
+
+
+        const updates = allRanked
+            .filter(r => !r.isFallback && r.originalProfile)
+            .map(r => {
+                const p = r.originalProfile;
+                const update: any = { id: p.id };
+                let changed = false;
+
+                if (r.fullName && r.fullName !== p.full_name) { update.full_name = r.fullName; changed = true; }
+                if (r.email && r.email !== p.email) { update.email = r.email; changed = true; }
+                if (r.phone && r.phone !== p.phone_number) { update.phone_number = r.phone; changed = true; }
+                if (r.location && r.location !== p.location) { update.location = r.location; changed = true; }
+                if (r.jobTitle && r.jobTitle !== p.job_title) { update.job_title = r.jobTitle; changed = true; }
+                if (r.yearsOfExperience !== undefined && r.yearsOfExperience !== p.years_of_experience) { 
+                    update.years_of_experience = r.yearsOfExperience; changed = true; 
+                }
+
+                return changed ? update : null;
+            })
+            .filter(Boolean);
+
+        if (updates.length) {
+            sendEvent('log', {
+              level: 'info',
+              message: `Updating ${updates.length} candidate profiles in database...`,
+            });
+            const { error: updateError } = await supabaseClient.from('profiles').upsert(updates, { onConflict: 'id' });
+            if (updateError) {
+              sendEvent('log', {
+                level: 'error',
+                message: `Failed to update some profiles: ${updateError.message}`,
+              });
+            } else {
+              sendEvent('log', {
+                level: 'info',
+                message: `Successfully updated ${updates.length} profiles.`,
+              });
+            }
+>>>>>>> 0979ce7837357f9add28a521613aa47a4707a507
         }
 
         // CRITICAL: Use ONLY original profile data - matching should NEVER modify profiles table
@@ -311,6 +390,14 @@ serve(async (req) => {
                 isFallback: r.isFallback || false
             };
         }).sort((a, b) => b.matchScore - a.matchScore);
+
+        const fallbackCount = validMatches.filter(m => m.isFallback).length;
+        const successCount = validMatches.length - fallbackCount;
+
+        sendEvent('log', {
+          level: 'info',
+          message: `Sending final results: ${successCount} successfully analyzed, ${fallbackCount} require manual review.`,
+        });
 
         const fallbackCount = validMatches.filter(m => m.isFallback).length;
         const successCount = validMatches.length - fallbackCount;
@@ -362,6 +449,14 @@ serve(async (req) => {
                 isFallback: r.isFallback || false,
               };
             }).sort((a: any, b: any) => b.matchScore - a.matchScore);
+
+            const fallbackCount = validMatches.filter((m: any) => m.isFallback).length;
+            const successCount = validMatches.length - fallbackCount;
+
+            sendEvent('log', {
+              level: 'info',
+              message: `Saving ${validMatches.length} partial results (${successCount} analyzed, ${fallbackCount} require review)...`,
+            });
 
             const fallbackCount = validMatches.filter((m: any) => m.isFallback).length;
             const successCount = validMatches.length - fallbackCount;

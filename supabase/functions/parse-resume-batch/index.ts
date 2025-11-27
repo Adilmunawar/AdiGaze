@@ -299,23 +299,8 @@ Output format: {"candidate": {...}}`
           
           const parsedData = JSON.parse(rawText);
           if (parsedData.candidate) {
-            const candidate = parsedData.candidate;
-
-            // Fallback: derive a human-readable name from email if AI did not return one
-            if (!candidate.full_name && candidate.email) {
-              const derivedName = deriveNameFromEmail(candidate.email);
-              if (derivedName && !isPlaceholderName(derivedName)) {
-                candidate.full_name = derivedName;
-              }
-            }
-
-            // Ensure we never persist obvious placeholder names
-            if (isPlaceholderName(candidate.full_name)) {
-              candidate.full_name = null;
-            }
-
-            console.log(`[RESUME ${globalFileIndex + 1}] ✓ Successfully parsed "${candidate.full_name || file.name}" (${globalFileIndex + 1}/${validFiles.length})`);
-            return { ...candidate, fileIndex: globalFileIndex };
+            console.log(`[RESUME ${globalFileIndex}] ✓ Successfully parsed "${parsedData.candidate.full_name || file.name}" (${globalFileIndex}/${validFiles.length})`);
+            return parsedData.candidate;
           } else {
             console.error(`[RESUME ${globalFileIndex}] ⚠ Missing candidate object for "${file.name}"`);
             batchFailedFiles.push(file.name);
