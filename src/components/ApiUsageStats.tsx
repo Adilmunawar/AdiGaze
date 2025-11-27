@@ -81,6 +81,7 @@ export const ApiUsageStats = () => {
     totalCandidates: 0,
     totalSearches: 0,
     totalMatches: 0,
+    totalResumes: 0,
     avgMatchScore: 0,
     successfulSearches: 0,
     failedSearches: 0,
@@ -110,6 +111,14 @@ export const ApiUsageStats = () => {
         .from('profiles')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
+
+      // Fetch resumes parsed in time range
+      const { data: resumes, count: totalResumes } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact' })
+        .eq('user_id', user.id)
+        .gte('created_at', cutoffTime)
+        .order('created_at', { ascending: false });
 
       // Fetch searches in time range
       const { data: searches, count: totalSearches } = await supabase
@@ -160,6 +169,12 @@ export const ApiUsageStats = () => {
           return matchTime >= pointTime && matchTime < nextPointTime;
         }).length || 0;
 
+        // Count resumes parsed in this time window
+        const resumesInWindow = resumes?.filter(r => {
+          const resumeTime = new Date(r.created_at);
+          return resumeTime >= pointTime && resumeTime < nextPointTime;
+        }).length || 0;
+
         const timeLabel = timeRange === '15m' ? `${i}m` :
                          timeRange === '1h' ? `${i * 5}m` :
                          timeRange === '6h' ? `${i}h` :
@@ -169,6 +184,7 @@ export const ApiUsageStats = () => {
           time: timeLabel,
           requests: searchesInWindow,
           matches: matchesInWindow,
+          resumes: resumesInWindow,
           success: searchesInWindow > 0 ? searchesInWindow : 0,
           errors: 0, // We don't track errors yet, but keeping for future
           latency: searchesInWindow > 0 ? 4.2 : 0
@@ -190,10 +206,23 @@ export const ApiUsageStats = () => {
         });
       }
 
+      if (resumes) {
+        resumes.slice(0, 10).forEach(resume => {
+          activity.push({
+            timestamp: new Date(resume.created_at),
+            action: 'Resume Parsed',
+            status: 'success' as const,
+            details: `${resume.full_name || 'Unknown'} - ${resume.job_title || 'No title'}`,
+            resumeId: resume.id
+          });
+        });
+      }
+
       setStats({
         totalCandidates: totalCandidates || 0,
         totalSearches: totalSearches || 0,
         totalMatches: totalMatches || 0,
+        totalResumes: totalResumes || 0,
         avgMatchScore: Math.round(avgMatchScore * 10) / 10,
         successfulSearches,
         failedSearches,
@@ -355,6 +384,10 @@ export const ApiUsageStats = () => {
                 <stop offset="5%" stopColor="hsl(var(--accent))" stopOpacity={0.3}/>
                 <stop offset="95%" stopColor="hsl(var(--accent))" stopOpacity={0}/>
               </linearGradient>
+              <linearGradient id="colorResumes" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="hsl(var(--chart-resume))" stopOpacity={0.3}/>
+                <stop offset="95%" stopColor="hsl(var(--chart-resume))" stopOpacity={0}/>
+              </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
             <XAxis 
@@ -383,6 +416,14 @@ export const ApiUsageStats = () => {
               strokeWidth={2}
               fill="url(#colorMatches)" 
               name="Matches Found"
+            />
+            <Area 
+              type="monotone" 
+              dataKey="resumes" 
+              stroke="hsl(var(--chart-resume))" 
+              strokeWidth={2}
+              fill="url(#colorResumes)" 
+              name="Resumes Parsed"
             />
           </AreaChart>
         </ResponsiveContainer>
