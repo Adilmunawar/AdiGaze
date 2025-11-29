@@ -80,6 +80,32 @@ function safeJsonParse(text: string): any | null {
   return null;
 }
 
+function deriveNameFromEmail(email: string | null): string | null {
+  if (!email) return null;
+  const localPart = email.split('@')[0];
+  let cleaned = localPart
+    .replace(/[0-9_.-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length < 3) return null;
+
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (!parts.length) return null;
+
+  const name = parts
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(' ');
+
+  return name;
+}
+
+function isPlaceholderName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().trim();
+  return ['unknown', 'n/a', 'not found', 'not specified', 'na', 'none'].includes(lower);
+}
+
 function normalizeProfile(parsed: any, fallbackResumeText: string | null, fileUrl: string | null) {
   return {
     full_name: sanitizeString(parsed?.full_name),
@@ -277,7 +303,7 @@ serve(async (req) => {
                   }
                 },
                 {
-                  text: `Extract all information from this resume and return a JSON object with these fields:\n{\n  "full_name": "string",\n  "email": "string",\n  "phone_number": "string",\n  "location": "string",\n  "job_title": "string",\n  "years_of_experience": number,\n  "sector": "string",\n  "skills": ["array", "of", "strings"],\n  "experience": "string (summary of work experience)",\n  "education": "string (summary of education)",\n  "resume_text": "string (full extracted text)"\n}\n\nReturn ONLY valid JSON, no markdown or explanations.`
+                  text: `Extract all information from this resume and return a JSON object with these fields:\n{\n  "full_name": "string or null",\n  "email": "string or null",\n  "phone_number": "string or null",\n  "location": "string or null",\n  "job_title": "string or null",\n  "years_of_experience": number or null,\n  "sector": "string or null",\n  "skills": ["array", "of", "strings"],\n  "experience": "string or null",\n  "education": "string or null",\n  "resume_text": "string"\n}\n\nCRITICAL: Extract the ACTUAL person's name for full_name. DO NOT use "Unknown", "N/A", or placeholders. If you cannot find a real name, set full_name to null. Same rule applies to all fields - use null instead of placeholder text.\n\nReturn ONLY valid JSON, no markdown or explanations.`
                 }
               ]
             }],
@@ -299,7 +325,7 @@ serve(async (req) => {
           geminiPayload = {
             contents: [{
               parts: [{
-                text: `Here is the resume text:\n\n${extractedText}\n\nExtract all information and return a JSON object with these fields:\n{\n  "full_name": "string",\n  "email": "string",\n  "phone_number": "string",\n  "location": "string",\n  "job_title": "string",\n  "years_of_experience": number,\n  "sector": "string",\n  "skills": ["array", "of", "strings"],\n  "experience": "string (summary of work experience)",\n  "education": "string (summary of education)",\n  "resume_text": "string (full extracted text)"\n}\n\nReturn ONLY valid JSON, no markdown or explanations.`
+                text: `Here is the resume text:\n\n${extractedText}\n\nExtract all information and return a JSON object with these fields:\n{\n  "full_name": "string or null",\n  "email": "string or null",\n  "phone_number": "string or null",\n  "location": "string or null",\n  "job_title": "string or null",\n  "years_of_experience": number or null,\n  "sector": "string or null",\n  "skills": ["array", "of", "strings"],\n  "experience": "string or null",\n  "education": "string or null",\n  "resume_text": "string"\n}\n\nCRITICAL: Extract the ACTUAL person's name for full_name. DO NOT use "Unknown", "N/A", or placeholders. If you cannot find a real name, set full_name to null. Same rule applies to all fields - use null instead of placeholder text.\n\nReturn ONLY valid JSON, no markdown or explanations.`
               }]
             }],
             generationConfig: {
@@ -371,7 +397,20 @@ serve(async (req) => {
         }
 
         const parsed = safeJsonParse(aiResponseText);
-        const normalizedProfile = normalizeProfile(parsed, aiResponseText, publicUrl);
+        const normalizedProfile = normalizeProfile(parsed, aiResponseText, publicUrl) as any;
+
+        // Fallback: derive a human-readable name from email if AI did not return one
+        if (!normalizedProfile.full_name && normalizedProfile.email) {
+          const derivedName = deriveNameFromEmail(normalizedProfile.email);
+          if (derivedName && !isPlaceholderName(derivedName)) {
+            normalizedProfile.full_name = derivedName;
+          }
+        }
+
+        // Ensure we never persist obvious placeholder names
+        if (isPlaceholderName(normalizedProfile.full_name)) {
+          normalizedProfile.full_name = null;
+        }
 
         // Generate embedding for semantic search
         sendEvent('log', { level: 'info', message: 'Generating embedding for semantic search...' });

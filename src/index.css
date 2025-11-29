@@ -32,6 +32,9 @@ All colors MUST be HSL.
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
+    
+    --chart-resume: 280 65% 60%;
+    --chart-resume-foreground: 0 0% 100%;
 
     --border: 214 32% 91%;
     --input: 214 32% 91%;
@@ -88,6 +91,9 @@ All colors MUST be HSL.
 
     --destructive: 0 63% 50%;
     --destructive-foreground: 0 0% 100%;
+    
+    --chart-resume: 280 65% 65%;
+    --chart-resume-foreground: 0 0% 100%;
 
     --border: 180 25% 22%;
     --input: 180 25% 22%;

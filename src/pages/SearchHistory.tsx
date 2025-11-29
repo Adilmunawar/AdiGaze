@@ -109,7 +109,7 @@ export default function SearchHistory() {
             variant="ghost"
             size="icon"
             onClick={() => navigate("/")}
-            className="hover:bg-primary/10"
+            className="hover:bg-primary hover:text-primary-foreground transition-all duration-300"
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -159,7 +159,7 @@ export default function SearchHistory() {
                       </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10">
+                          <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all duration-300">
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </AlertDialogTrigger>

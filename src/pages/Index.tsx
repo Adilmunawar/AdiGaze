@@ -6,12 +6,13 @@ import { ApiUsageStats } from '@/components/ApiUsageStats';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Users, Upload, LogOut, Bookmark, History, Settings, Activity } from 'lucide-react';
+import { Users, Upload, LogOut, Bookmark, History, Settings, Activity, Clock } from 'lucide-react';
 import adiGazeLogo from '@/assets/adigaze-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import Footer from '@/components/Footer';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const Index = () => {
   const { user, loading, signOut } = useAuth();
@@ -81,6 +82,11 @@ const Index = () => {
 
   return (
     <div className="min-h-screen relative overflow-hidden animate-fade-in flex flex-col">
+      {/* Notification Bell - Top Right Corner */}
+      <div className="absolute top-4 right-4 z-50">
+        <NotificationBell />
+      </div>
+
       {/* Animated Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
         <div className="absolute inset-0 bg-mesh" />
@@ -130,7 +136,7 @@ const Index = () => {
                 variant="outline"
                 size="default"
                 onClick={() => navigate('/bookmarks')}
-                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-primary/10 border-primary/40 hover:border-primary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground border-primary/40 hover:border-primary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <Bookmark className="h-4 w-4" />
                 My Bookmarks
@@ -139,7 +145,7 @@ const Index = () => {
                 variant="outline"
                 size="default"
                 onClick={() => navigate('/history')}
-                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-secondary/10 border-secondary/40 hover:border-secondary/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
+                className="gap-2 bg-card/60 backdrop-blur-sm hover:bg-secondary hover:text-secondary-foreground border-secondary/40 hover:border-secondary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300"
               >
                 <History className="h-4 w-4" />
                 Search History
@@ -174,15 +180,26 @@ const Index = () => {
               </TabsTrigger>
             </TabsList>
             
-            <Button
-              onClick={() => navigate('/candidates')}
-              variant="outline"
-              size="lg"
-              className="w-full md:w-auto gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent/10 border-accent/40 hover:border-accent/60 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
-            >
-              <Users className="h-5 w-5" />
-              View All Candidates
-            </Button>
+            <div className="flex gap-3 w-full md:w-auto">
+              <Button
+                onClick={() => navigate('/candidates')}
+                variant="outline"
+                size="lg"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-accent hover:text-accent-foreground border-accent/40 hover:border-accent shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+              >
+                <Users className="h-5 w-5" />
+                View All Candidates
+              </Button>
+              <Button
+                onClick={() => navigate('/recent-resumes')}
+                variant="outline"
+                size="lg"
+                className="gap-3 h-11 px-6 bg-card/60 backdrop-blur-sm hover:bg-secondary hover:text-secondary-foreground border-secondary/40 hover:border-secondary shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-premium)] transition-all duration-300 text-sm"
+              >
+                <Clock className="h-5 w-5" />
+                Recent Resumes
+              </Button>
+            </div>
           </div>
 
           <TabsContent value="upload" className="space-y-6 animate-fade-in">

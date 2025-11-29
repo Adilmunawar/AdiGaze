@@ -82,8 +82,6 @@ serve(async (req) => {
           message: `Created ${batches.length} internal batches of up to ${BATCH_SIZE} candidates each (max ${BATCH_SIZE * GEMINI_KEYS.length * 2} candidates in parallel).`,
         });
 
-        // allRanked declared above
-
         let nextBatchIndex = 0;
         let processedCount = 0;
 
@@ -132,10 +130,10 @@ serve(async (req) => {
                     body: JSON.stringify({
                       contents: [{
                         parts: [{
-                          text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "fullName": "...", "email": "...", "phone": "...", "location": "...", "jobTitle": "...", "yearsOfExperience": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": []}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates.`,
+                          text: `Job Description:\n${jobDescription}\n\nCandidates:\n${JSON.stringify(summaries)}\n\nExtract info and match. JSON format: {"candidates": [{"candidateIndex": 0, "matchScore": 0, "reasoning": "single concise line only", "strengths": [], "concerns": [], "company": ""}]}. IMPORTANT: "reasoning" must be ONLY ONE SHORT SENTENCE (max 15 words). Return ALL candidates with their match scores.`,
                         }],
                       }],
-                      generationConfig: { responseMimeType: "application/json" },
+                      generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
                     }),
                   },
                 );
@@ -173,24 +171,35 @@ serve(async (req) => {
                 allRanked.push(...ranked);
                 success = true;
 
-              const partialMatches = ranked.map((r: any) => ({
-                id: r.originalProfile.id,
-                full_name: r.fullName || r.originalProfile.full_name,
-                matchScore: r.matchScore,
-                reasoning: r.reasoning,
-                strengths: r.strengths || [],
-                concerns: r.concerns || [],
-                resume_file_url: r.originalProfile.resume_file_url,
-                isFallback: r.isFallback || false,
-              }));
+                // CRITICAL: Use ONLY original profile data - never AI-extracted data
+                const partialMatches = ranked.map((r: any) => {
+                  const p = r.originalProfile;
 
-              processedCount += batch.length;
+                  return {
+                    id: p.id,
+                    full_name: p.full_name,
+                    email: p.email,
+                    phone_number: p.phone_number,
+                    location: p.location,
+                    job_title: p.job_title,
+                    years_of_experience: p.years_of_experience,
+                    matchScore: r.matchScore,
+                    reasoning: r.reasoning,
+                    strengths: r.strengths || [],
+                    concerns: r.concerns || [],
+                    company: r.company || null,
+                    resume_file_url: p.resume_file_url,
+                    isFallback: false,
+                  };
+                });
 
-              sendEvent('partial', {
-                matches: partialMatches,
-                processed: processedCount,
-                total: profiles.length,
-              });
+                processedCount += batch.length;
+
+                sendEvent('partial', {
+                  matches: partialMatches,
+                  processed: processedCount,
+                  total: profiles.length,
+                });
 
                 sendEvent('log', {
                   level: 'info',
@@ -212,10 +221,9 @@ serve(async (req) => {
                 message: `[Worker ${workerIndex + 1}] All retries exhausted for batch ${currentIndex + 1}. Error: ${lastError?.message || 'Unknown error'}`,
               });
 
-              // FALLBACK: Return dummy objects so candidates don't disappear
+              // FALLBACK: Use original profile data
               const fallbackRanked = batch.map(p => ({
                 originalProfile: p,
-                fullName: p.full_name || 'Processing Failed',
                 matchScore: 0,
                 reasoning: 'Analysis failed after retries - manual review needed',
                 isFallback: true,
@@ -223,16 +231,26 @@ serve(async (req) => {
 
               allRanked.push(...fallbackRanked);
 
-              const partialMatches = fallbackRanked.map((r: any) => ({
-                id: r.originalProfile.id,
-                full_name: r.fullName || r.originalProfile.full_name,
-                matchScore: r.matchScore,
-                reasoning: r.reasoning,
-                strengths: r.strengths || [],
-                concerns: r.concerns || [],
-                resume_file_url: r.originalProfile.resume_file_url,
-                isFallback: r.isFallback || false,
-              }));
+              const partialMatches = fallbackRanked.map((r: any) => {
+                const p = r.originalProfile;
+
+                return {
+                  id: p.id,
+                  full_name: p.full_name,
+                  email: p.email,
+                  phone_number: p.phone_number,
+                  location: p.location,
+                  job_title: p.job_title,
+                  years_of_experience: p.years_of_experience,
+                  matchScore: 0,
+                  reasoning: r.reasoning,
+                  strengths: [],
+                  concerns: ['Analysis failed - requires manual review'],
+                  company: null,
+                  resume_file_url: p.resume_file_url,
+                  isFallback: true,
+                };
+              });
 
               processedCount += batch.length;
 
@@ -272,56 +290,27 @@ serve(async (req) => {
           });
         }
 
-
-        const updates = allRanked
-            .filter(r => !r.isFallback && r.originalProfile)
-            .map(r => {
-                const p = r.originalProfile;
-                const update: any = { id: p.id };
-                let changed = false;
-
-                if (r.fullName && r.fullName !== p.full_name) { update.full_name = r.fullName; changed = true; }
-                if (r.email && r.email !== p.email) { update.email = r.email; changed = true; }
-                if (r.phone && r.phone !== p.phone_number) { update.phone_number = r.phone; changed = true; }
-                if (r.location && r.location !== p.location) { update.location = r.location; changed = true; }
-                if (r.jobTitle && r.jobTitle !== p.job_title) { update.job_title = r.jobTitle; changed = true; }
-                if (r.yearsOfExperience !== undefined && r.yearsOfExperience !== p.years_of_experience) { 
-                    update.years_of_experience = r.yearsOfExperience; changed = true; 
-                }
-
-                return changed ? update : null;
-            })
-            .filter(Boolean);
-
-        if (updates.length) {
-            sendEvent('log', {
-              level: 'info',
-              message: `Updating ${updates.length} candidate profiles in database...`,
-            });
-            const { error: updateError } = await supabaseClient.from('profiles').upsert(updates, { onConflict: 'id' });
-            if (updateError) {
-              sendEvent('log', {
-                level: 'error',
-                message: `Failed to update some profiles: ${updateError.message}`,
-              });
-            } else {
-              sendEvent('log', {
-                level: 'info',
-                message: `Successfully updated ${updates.length} profiles.`,
-              });
-            }
-        }
-
-        const validMatches = allRanked.map(r => ({
-            id: r.originalProfile.id,
-            full_name: r.fullName || r.originalProfile.full_name,
-            matchScore: r.matchScore,
-            reasoning: r.reasoning,
-            strengths: r.strengths || [],
-            concerns: r.concerns || [],
-            resume_file_url: r.originalProfile.resume_file_url,
-            isFallback: r.isFallback || false
-        })).sort((a, b) => b.matchScore - a.matchScore);
+        // CRITICAL: Use ONLY original profile data - matching should NEVER modify profiles table
+        const validMatches = allRanked.map(r => {
+            const p = r.originalProfile;
+            
+            return {
+                id: p.id,
+                full_name: p.full_name,
+                email: p.email,
+                phone_number: p.phone_number,
+                location: p.location,
+                job_title: p.job_title,
+                years_of_experience: p.years_of_experience,
+                matchScore: r.matchScore,
+                reasoning: r.reasoning,
+                strengths: r.strengths || [],
+                concerns: r.concerns || [],
+                company: r.company || null,
+                resume_file_url: p.resume_file_url,
+                isFallback: r.isFallback || false
+            };
+        }).sort((a, b) => b.matchScore - a.matchScore);
 
         const fallbackCount = validMatches.filter(m => m.isFallback).length;
         const successCount = validMatches.length - fallbackCount;
@@ -358,16 +347,21 @@ serve(async (req) => {
           if (allRanked.length) {
             const safeTotal = profiles.length || allRanked.length;
 
-            const validMatches = allRanked.map((r: any) => ({
-              id: r.originalProfile.id,
-              full_name: r.fullName || r.originalProfile.full_name,
-              matchScore: r.matchScore,
-              reasoning: r.reasoning,
-              strengths: r.strengths || [],
-              concerns: r.concerns || [],
-              resume_file_url: r.originalProfile.resume_file_url,
-              isFallback: r.isFallback || false,
-            })).sort((a: any, b: any) => b.matchScore - a.matchScore);
+            // Use ONLY original profile data even in error case
+            const validMatches = allRanked.map((r: any) => {
+              const p = r.originalProfile;
+              
+              return {
+                id: p.id,
+                full_name: p.full_name,
+                matchScore: r.matchScore,
+                reasoning: r.reasoning,
+                strengths: r.strengths || [],
+                concerns: r.concerns || [],
+                resume_file_url: p.resume_file_url,
+                isFallback: r.isFallback || false,
+              };
+            }).sort((a: any, b: any) => b.matchScore - a.matchScore);
 
             const fallbackCount = validMatches.filter((m: any) => m.isFallback).length;
             const successCount = validMatches.length - fallbackCount;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase, Trash2 } from 'lucide-react';
+import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase, Trash2, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,6 +10,12 @@ import { useToast } from '@/hooks/use-toast';
 import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { format } from 'date-fns';
+import type { DateRange } from 'react-day-picker';
+import { cn } from '@/lib/utils';
 import {
   Pagination,
   PaginationContent,
@@ -66,6 +72,10 @@ export const CandidateHunting = () => {
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
+  const [timeFilter, setTimeFilter] = useState<string>('all');
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
+  const [filteredCandidateCount, setFilteredCandidateCount] = useState<number | null>(null);
+  const [loadingCount, setLoadingCount] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
   
@@ -82,6 +92,11 @@ export const CandidateHunting = () => {
       loadLastSearch();
     }
   }, [searchParams]);
+
+  // Update filtered candidate count when filters change
+  useEffect(() => {
+    fetchFilteredCandidateCount();
+  }, [timeFilter, customDateRange, selectedJobTitles]);
 
   const fetchJobTitles = async () => {
     try {
@@ -100,6 +115,75 @@ export const CandidateHunting = () => {
       setAvailableJobTitles(uniqueTitles.sort());
     } catch (error) {
       console.error('Error fetching job titles:', error);
+    }
+  };
+
+  const fetchFilteredCandidateCount = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setFilteredCandidateCount(null);
+        return;
+      }
+
+      setLoadingCount(true);
+
+      let query = supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      // Apply time filter
+      if (timeFilter !== 'all') {
+        if (timeFilter === 'custom' && customDateRange?.from) {
+          const startDate = customDateRange.from;
+          query = query.gte('created_at', startDate.toISOString());
+          
+          if (customDateRange.to) {
+            const endDate = new Date(customDateRange.to);
+            endDate.setHours(23, 59, 59, 999);
+            query = query.lte('created_at', endDate.toISOString());
+          }
+        } else {
+          const now = new Date();
+          let cutoffDate: Date;
+
+          switch (timeFilter) {
+            case '1day':
+              cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+              break;
+            case '3days':
+              cutoffDate = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+              break;
+            case '7days':
+              cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+              break;
+            case '1month':
+              cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+              break;
+            default:
+              cutoffDate = new Date(0);
+          }
+
+          query = query.gte('created_at', cutoffDate.toISOString());
+        }
+      }
+
+      // Apply job title filter
+      if (selectedJobTitles.length > 0) {
+        query = query.in('job_title', selectedJobTitles);
+      }
+
+      const { count, error } = await query;
+
+      if (error) throw error;
+
+      setFilteredCandidateCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching candidate count:', error);
+      setFilteredCandidateCount(null);
+    } finally {
+      setLoadingCount(false);
     }
   };
 
@@ -291,7 +375,7 @@ export const CandidateHunting = () => {
     }
   };
 
-  const exportToCSV = () => {
+  const exportToExcel = async () => {
     if (matches.length === 0) {
       toast({
         title: 'No Data to Export',
@@ -301,67 +385,38 @@ export const CandidateHunting = () => {
       return;
     }
 
-    // Create CSV headers
-    const headers = [
-      'Rank',
-      'Full Name',
-      'Email',
-      'Phone Number',
-      'Location',
-      'Job Title',
-      'Years of Experience',
-      'Match %',
-      'Key Strengths',
-      'Potential Concerns',
-      'Reasoning',
-      'Resume URL'
-    ];
+    const excelData = matches.map((candidate, index) => ({
+      'Rank': index + 1,
+      'Full Name': candidate.full_name || '',
+      'Email': candidate.email || '',
+      'Phone Number': candidate.phone_number || '',
+      'Location': candidate.location || '',
+      'Job Title': candidate.job_title || '',
+      'Years of Experience': candidate.years_of_experience || '',
+      'Match %': candidate.matchScore,
+      'Key Strengths': candidate.strengths.join('; '),
+      'Potential Concerns': candidate.concerns.join('; '),
+      'Reasoning': candidate.reasoning || '',
+      'Resume URL': candidate.resume_file_url || ''
+    }));
 
-    // Create CSV rows
-    const rows = matches.map((candidate, index) => [
-      index + 1,
-      candidate.full_name || '',
-      candidate.email || '',
-      candidate.phone_number || '',
-      candidate.location || '',
-      candidate.job_title || '',
-      candidate.years_of_experience || '',
-      candidate.matchScore,
-      candidate.strengths.join('; '),
-      candidate.concerns.join('; '),
-      candidate.reasoning || '',
-      candidate.resume_file_url || ''
-    ]);
-
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => {
-        // Escape commas and quotes in cell content
-        const cellStr = String(cell);
-        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
-          return `"${cellStr.replace(/"/g, '""')}"`;
-        }
-        return cellStr;
-      }).join(','))
-    ].join('\n');
-
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
+    const XLSX = await import('xlsx');
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Candidate Matches');
     
-    link.setAttribute('href', url);
-    link.setAttribute('download', `candidate_matches_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Auto-size columns
+    const maxWidth = 50;
+    const colWidths = Object.keys(excelData[0] || {}).map(key => ({
+      wch: Math.min(maxWidth, Math.max(key.length, ...excelData.map(row => String(row[key as keyof typeof row]).length)))
+    }));
+    ws['!cols'] = colWidths;
+
+    XLSX.writeFile(wb, `candidate_matches_${new Date().toISOString().split('T')[0]}.xlsx`);
 
     toast({
-      title: 'CSV Exported Successfully',
-      description: `Exported ${matches.length} candidates to CSV`,
+      title: 'Excel Exported Successfully',
+      description: `Exported ${matches.length} candidates to Excel`,
     });
   };
 
@@ -792,6 +847,48 @@ export const CandidateHunting = () => {
         .select('id')
         .eq('user_id', user.id);
 
+      // Apply time filter if selected
+      if (timeFilter !== 'all') {
+        if (timeFilter === 'custom' && customDateRange?.from) {
+          const startDate = customDateRange.from;
+          query = query.gte('created_at', startDate.toISOString());
+          
+          if (customDateRange.to) {
+            const endDate = new Date(customDateRange.to);
+            endDate.setHours(23, 59, 59, 999);
+            query = query.lte('created_at', endDate.toISOString());
+          }
+          
+          const dateRangeStr = customDateRange.to 
+            ? `${startDate.toLocaleDateString()} - ${customDateRange.to.toLocaleDateString()}`
+            : `from ${startDate.toLocaleDateString()}`;
+          addLog('info', `Filtering candidates uploaded ${dateRangeStr}`);
+        } else {
+          const now = new Date();
+          let cutoffDate: Date;
+
+          switch (timeFilter) {
+            case '1day':
+              cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+              break;
+            case '3days':
+              cutoffDate = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+              break;
+            case '7days':
+              cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+              break;
+            case '1month':
+              cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+              break;
+            default:
+              cutoffDate = new Date(0);
+          }
+
+          query = query.gte('created_at', cutoffDate.toISOString());
+          addLog('info', `Filtering candidates uploaded since ${cutoffDate.toLocaleDateString()}`);
+        }
+      }
+
       // Apply job title filter if selected
       if (selectedJobTitles.length > 0) {
         query = query.in('job_title', selectedJobTitles);
@@ -954,6 +1051,81 @@ export const CandidateHunting = () => {
             </div>
           </div>
 
+          <div className="space-y-3 p-4 bg-secondary/5 rounded-lg border border-primary/10">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              <h4 className="font-semibold text-foreground">Filter by Upload Date (Optional)</h4>
+            </div>
+            <p className="text-sm text-muted-foreground">Match only candidates whose resumes were uploaded within a specific time period</p>
+            <Select value={timeFilter} onValueChange={(value) => {
+              setTimeFilter(value);
+              if (value !== 'custom') {
+                setCustomDateRange(undefined);
+              }
+            }}>
+              <SelectTrigger className="w-full bg-background/50">
+                <SelectValue placeholder="Select time range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time (Default)</SelectItem>
+                <SelectItem value="1day">Past 24 Hours</SelectItem>
+                <SelectItem value="3days">Past 3 Days</SelectItem>
+                <SelectItem value="7days">Past 7 Days</SelectItem>
+                <SelectItem value="1month">Past Month</SelectItem>
+                <SelectItem value="custom">Custom Date Range</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {timeFilter === 'custom' && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal bg-background/50",
+                      !customDateRange && "text-muted-foreground"
+                    )}
+                  >
+                    <Calendar className="mr-2 h-4 w-4" />
+                    {customDateRange?.from ? (
+                      customDateRange.to ? (
+                        <>
+                          {format(customDateRange.from, "PPP")} - {format(customDateRange.to, "PPP")}
+                        </>
+                      ) : (
+                        format(customDateRange.from, "PPP")
+                      )
+                    ) : (
+                      <span>Pick a date range</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="range"
+                    selected={customDateRange}
+                    onSelect={setCustomDateRange}
+                    numberOfMonths={2}
+                    disabled={(date) => date > new Date()}
+                    initialFocus
+                    className={cn("p-3 pointer-events-auto")}
+                  />
+                </PopoverContent>
+              </Popover>
+            )}
+
+            {filteredCandidateCount !== null && (
+              <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg border border-primary/20">
+                <span className="text-sm font-medium text-foreground">
+                  Candidates matching current filters:
+                </span>
+                <Badge variant="secondary" className="text-base font-bold">
+                  {loadingCount ? '...' : filteredCandidateCount}
+                </Badge>
+              </div>
+            )}
+          </div>
+
           {availableJobTitles.length > 0 && (
             <div className="space-y-3 p-4 bg-secondary/5 rounded-lg border border-primary/10">
               <div className="flex items-center justify-between gap-3">
@@ -1112,23 +1284,23 @@ export const CandidateHunting = () => {
                 <Button
                   onClick={cleanDuplicates}
                   variant="outline"
-                  className="flex items-center gap-2 bg-gradient-to-r from-accent/10 to-accent/20 hover:from-accent/20 hover:to-accent/30 border-accent/30"
+                  className="flex items-center gap-2 bg-accent/5 hover:bg-accent hover:text-accent-foreground border-accent/30 hover:border-accent transition-all duration-300"
                 >
                   <Trash2 className="h-4 w-4" />
                   Clean Duplicates
                 </Button>
                 <Button
-                  onClick={exportToCSV}
+                  onClick={exportToExcel}
                   variant="outline"
-                  className="flex items-center gap-2 bg-gradient-to-r from-primary/10 to-secondary/10 hover:from-primary/20 hover:to-secondary/20 border-primary/30"
+                  className="flex items-center gap-2 bg-primary/5 hover:bg-primary hover:text-primary-foreground border-primary/30 hover:border-primary transition-all duration-300"
                 >
                   <Download className="h-4 w-4" />
-                  Export to CSV
+                  Export to Excel
                 </Button>
                 <Button
                   onClick={handleClearResults}
                   variant="outline"
-                  className="flex items-center gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+                  className="flex items-center gap-2 border-destructive/30 text-destructive hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-all duration-300"
                 >
                   <X className="h-4 w-4" />
                   Clear Results
