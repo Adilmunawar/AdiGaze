@@ -683,7 +683,190 @@ const DeveloperSettings = () => {
             </section>
 
             <section className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start">
-              {/* ... keep existing backup creation and table UI ... */}
+              <Card className="shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="h-5 w-5" />
+                    Create Backup
+                  </CardTitle>
+                  <CardDescription>
+                    Snapshot your current profiles, searches, matches, bookmarks and admin settings
+                    into a single backup. Use the toggles below to choose which tables are included.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-muted-foreground">
+                      Optional label
+                    </label>
+                    <Input
+                      value={label}
+                      onChange={e => setLabel(e.target.value)}
+                      placeholder="e.g. Before major import, Stable config, etc."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Tables to include</p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {[
+                        { key: 'profiles', label: 'Candidate profiles' },
+                        { key: 'job_searches', label: 'Job searches' },
+                        { key: 'candidate_matches', label: 'Matched candidates' },
+                        { key: 'candidate_bookmarks', label: 'Bookmarks' },
+                        { key: 'admin_profiles', label: 'Admin settings' },
+                      ].map(option => (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() =>
+                            setSelectedTables(prev => ({
+                              ...prev,
+                              [option.key]: !prev[option.key],
+                            }))
+                          }
+                          className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left hover:bg-accent/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[10px] ${selectedTables[option.key]
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-background text-muted-foreground border-border'
+                              }`}
+                            >
+                              {selectedTables[option.key] ? '✓' : ''}
+                            </span>
+                            <span className="text-xs font-medium">{option.label}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <Button
+                    onClick={createBackup}
+                    disabled={isCreatingBackup}
+                    className="w-full gap-2"
+                  >
+                    {isCreatingBackup ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Creating backup...
+                      </>
+                    ) : (
+                      <>
+                        <Database className="h-4 w-4" />
+                        Create Backup Now
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Backups are stored per account. Restores will overwrite your own data in the tracked
+                    tables but never affect other users.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Existing Backups</CardTitle>
+                    <CardDescription>
+                      Choose a snapshot to download, restore or remove. Ordered from newest to oldest.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 sm:mt-0 gap-2"
+                    onClick={() => setIsLogDialogOpen(true)}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    View Activity Log
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isLoadingBackups ? (
+                    <div className="flex items-center justify-center py-12 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                      Loading backups...
+                    </div>
+                  ) : backups.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4">
+                      No backups yet. Create your first snapshot using the panel on the left.
+                    </p>
+                  ) : (
+                    <div className="border rounded-md overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[40%]">Label / ID</TableHead>
+                            <TableHead>Created At</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {backups.map(backup => (
+                            <TableRow key={backup.id}>
+                              <TableCell>
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium truncate max-w-[220px]">
+                                    {backup.label || 'Untitled backup'}
+                                  </span>
+                                  <span className="text-[11px] text-muted-foreground break-all">
+                                    {backup.id}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {new Date(backup.created_at).toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right space-x-1">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  title="Download backup JSON"
+                                  onClick={() => void downloadBackup(backup.id)}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  title="Restore from this backup"
+                                  onClick={() => void restoreBackup(backup.id)}
+                                  disabled={isRestoringId === backup.id}
+                                >
+                                  {isRestoringId === backup.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  title="Delete this backup"
+                                  onClick={() => void deleteBackup(backup.id)}
+                                  disabled={isDeletingId === backup.id}
+                                >
+                                  {isDeletingId === backup.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </section>
           </main>
         </div>

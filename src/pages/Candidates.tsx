@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, FileText, Mail, Phone, MapPin, Briefcase, ExternalLink, Trash2, Download, FileSpreadsheet } from 'lucide-react';
+import { FileText, Mail, Phone, MapPin, Briefcase, ExternalLink, Trash2, Download, FileSpreadsheet } from 'lucide-react';
 import { Tables } from '@/integrations/supabase/types';
 import Footer from '@/components/Footer';
 import * as XLSX from 'xlsx';
@@ -363,18 +363,11 @@ export default function Candidates() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-primary/5 flex flex-col">
-      <div className="container mx-auto px-4 py-8 flex-1">
+    <AppSidebarLayout>
+      <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-primary/5 flex flex-col">
+        <div className="container mx-auto px-4 py-8 flex-1">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              onClick={() => navigate('/')}
-              className="gap-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
+          <div>
             <h1 className="text-4xl font-bold text-foreground">All Candidates</h1>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -788,5 +781,6 @@ export default function Candidates() {
       </AlertDialog>
       <Footer />
     </div>
+  </AppSidebarLayout>
   );
 }
