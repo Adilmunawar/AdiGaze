@@ -96,7 +96,7 @@ export const AppSidebarLayout: React.FC<AppSidebarLayoutProps> = ({ children }) 
   );
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-background via-muted/10 to-background text-foreground">
+    <div className="h-screen flex bg-gradient-to-br from-background via-muted/10 to-background text-foreground overflow-hidden">
       {/* Sidebar */}
       <aside
         className={cn(
@@ -152,7 +152,7 @@ export const AppSidebarLayout: React.FC<AppSidebarLayoutProps> = ({ children }) 
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 relative overflow-hidden">
+      <main className="flex-1 relative overflow-y-auto">
         {children}
       </main>
     </div>

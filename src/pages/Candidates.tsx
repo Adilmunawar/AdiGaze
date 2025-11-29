@@ -23,6 +23,7 @@ import { Tables } from '@/integrations/supabase/types';
 import Footer from '@/components/Footer';
 import * as XLSX from 'xlsx';
 import { UploadDateFilter, type UploadDateFilterValue } from '@/components/UploadDateFilter';
+import AppSidebarLayout from '@/components/AppSidebarLayout';
 
 type Profile = Tables<'profiles'>;
 
