@@ -22,6 +22,7 @@ import { ArrowLeft, FileText, Mail, Phone, MapPin, Briefcase, ExternalLink, Tras
 import { Tables } from '@/integrations/supabase/types';
 import Footer from '@/components/Footer';
 import * as XLSX from 'xlsx';
+import { UploadDateFilter, type UploadDateFilterValue } from '@/components/UploadDateFilter';
 
 type Profile = Tables<'profiles'>;
 
@@ -46,16 +47,17 @@ export default function Candidates() {
   const [locationFilter, setLocationFilter] = useState<string>('all');
   const [experienceFilter, setExperienceFilter] = useState<string>('all');
   const [locations, setLocations] = useState<string[]>([]);
+  const [uploadDateFilter, setUploadDateFilter] = useState<UploadDateFilterValue>('all');
   const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     fetchProfiles();
-  }, [currentPage, searchTerm, selectedJobTitle, locationFilter, experienceFilter]);
+  }, [currentPage, searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
     setSelectedCandidates(new Set());
-  }, [searchTerm, selectedJobTitle, locationFilter, experienceFilter]);
+  }, [searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter]);
 
   const fetchProfiles = async () => {
     setLoading(true);
@@ -89,6 +91,23 @@ export default function Candidates() {
         } else if (experienceFilter === '10+') {
           query = query.gt('years_of_experience', 10);
         }
+      }
+
+      if (uploadDateFilter !== 'all') {
+        const now = new Date();
+        const from = new Date(now);
+
+        if (uploadDateFilter === '24h') {
+          from.setDate(now.getDate() - 1);
+        } else if (uploadDateFilter === '3d') {
+          from.setDate(now.getDate() - 3);
+        } else if (uploadDateFilter === '7d') {
+          from.setDate(now.getDate() - 7);
+        } else if (uploadDateFilter === '30d') {
+          from.setDate(now.getDate() - 30);
+        }
+
+        query = query.gte('created_at', from.toISOString());
       }
 
       // Apply pagination and ordering
@@ -407,7 +426,7 @@ export default function Candidates() {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <Label htmlFor="job-title" className="text-sm font-medium mb-2 block">
                   Job Title
@@ -463,9 +482,11 @@ export default function Candidates() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
             </div>
 
-            {(searchTerm || selectedJobTitle !== 'all' || locationFilter !== 'all' || experienceFilter !== 'all') && (
+            {(searchTerm || selectedJobTitle !== 'all' || locationFilter !== 'all' || experienceFilter !== 'all' || uploadDateFilter !== 'all') && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -474,6 +495,7 @@ export default function Candidates() {
                   setSelectedJobTitle('all');
                   setLocationFilter('all');
                   setExperienceFilter('all');
+                  setUploadDateFilter('all');
                 }}
                 className="text-sm"
               >
@@ -484,7 +506,7 @@ export default function Candidates() {
           
           <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm text-muted-foreground">
             <span>
-              Showing {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} of {totalCount} candidates
+              Showing {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} of {totalCount} candidate(s) matching current filters
             </span>
             {selectedCandidates.size > 0 && (
               <span className="font-medium text-primary">

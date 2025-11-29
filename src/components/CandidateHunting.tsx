@@ -55,6 +55,7 @@ export const CandidateHunting = () => {
   const [totalCandidates, setTotalCandidates] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [bookmarkedEmails, setBookmarkedEmails] = useState<Set<string>>(new Set());
   const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
   const [currentSearchId, setCurrentSearchId] = useState<string | null>(null);
   const [searchProgress, setSearchProgress] = useState(0);
@@ -194,11 +195,21 @@ export const CandidateHunting = () => {
 
       const { data, error } = await supabase
         .from('candidate_bookmarks')
-        .select('candidate_id');
+        .select('candidate_id, profiles!inner(email)');
 
       if (error) throw error;
 
-      setBookmarkedIds(new Set(data?.map(b => b.candidate_id) || []));
+      const ids = new Set<string>();
+      const emails = new Set<string>();
+
+      (data || []).forEach((b: any) => {
+        if (b.candidate_id) ids.add(b.candidate_id);
+        const email = b.profiles?.email as string | null;
+        if (email) emails.add(email.toLowerCase().trim());
+      });
+
+      setBookmarkedIds(ids);
+      setBookmarkedEmails(emails);
     } catch (error) {
       console.error('Error fetching bookmarks:', error);
     }
@@ -315,7 +326,7 @@ export const CandidateHunting = () => {
     }
   };
 
-  const toggleBookmark = async (candidateId: string) => {
+  const toggleBookmark = async (candidate: CandidateMatch) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -327,20 +338,56 @@ export const CandidateHunting = () => {
         return;
       }
 
-      const isBookmarked = bookmarkedIds.has(candidateId);
+      const emailKey = candidate.email?.toLowerCase().trim();
+      if (!emailKey) {
+        toast({
+          title: 'Cannot bookmark candidate',
+          description: 'This candidate has no email, so we cannot link it to a profile.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Find the actual profile row for this candidate based on email + user
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('email', candidate.email)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      if (!profile) {
+        toast({
+          title: 'Cannot bookmark candidate',
+          description: 'No matching resume/profile found for this candidate.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const profileId = profile.id as string;
+      const isBookmarked = bookmarkedEmails.has(emailKey);
 
       if (isBookmarked) {
         const { error } = await supabase
           .from('candidate_bookmarks')
           .delete()
           .eq('user_id', user.id)
-          .eq('candidate_id', candidateId);
+          .eq('candidate_id', profileId);
 
         if (error) throw error;
 
         setBookmarkedIds(prev => {
           const next = new Set(prev);
-          next.delete(candidateId);
+          next.delete(profileId);
+          return next;
+        });
+
+        setBookmarkedEmails(prev => {
+          const next = new Set(prev);
+          next.delete(emailKey);
           return next;
         });
 
@@ -353,12 +400,22 @@ export const CandidateHunting = () => {
           .from('candidate_bookmarks')
           .insert({
             user_id: user.id,
-            candidate_id: candidateId,
+            candidate_id: profileId,
           });
 
         if (error) throw error;
 
-        setBookmarkedIds(prev => new Set(prev).add(candidateId));
+        setBookmarkedIds(prev => {
+          const next = new Set(prev);
+          next.add(profileId);
+          return next;
+        });
+
+        setBookmarkedEmails(prev => {
+          const next = new Set(prev);
+          next.add(emailKey);
+          return next;
+        });
 
         toast({
           title: 'Bookmarked!',
@@ -1252,7 +1309,7 @@ export const CandidateHunting = () => {
 
       {matches.length > 0 && (() => {
         const filteredMatches = showBookmarkedOnly 
-          ? matches.filter(m => bookmarkedIds.has(m.id))
+          ? matches.filter(m => m.email && bookmarkedEmails.has(m.email.toLowerCase().trim()))
           : matches;
         const totalPages = Math.ceil(filteredMatches.length / itemsPerPage);
         const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1336,15 +1393,15 @@ export const CandidateHunting = () => {
                       {candidate.matchScore}% Match
                     </Badge>
                     <Button
-                      onClick={() => toggleBookmark(candidate.id)}
+                      onClick={() => toggleBookmark(candidate)}
                       variant="ghost"
                       size="sm"
                       className="ml-auto"
-                      title={bookmarkedIds.has(candidate.id) ? "Remove bookmark" : "Bookmark candidate"}
+                      title={candidate.email && bookmarkedEmails.has(candidate.email.toLowerCase().trim()) ? "Remove bookmark" : "Bookmark candidate"}
                     >
                       <Bookmark 
                         className={`h-5 w-5 transition-all ${
-                          bookmarkedIds.has(candidate.id) 
+                          candidate.email && bookmarkedEmails.has(candidate.email.toLowerCase().trim())
                             ? 'fill-primary text-primary' 
                             : 'text-muted-foreground hover:text-primary'
                         }`}

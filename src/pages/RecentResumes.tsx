@@ -7,6 +7,7 @@ import { FileText, ExternalLink, ArrowLeft, Clock, Loader2, Upload } from 'lucid
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import Footer from '@/components/Footer';
+import { UploadDateFilter, type UploadDateFilterValue } from '@/components/UploadDateFilter';
 
 interface Resume {
   id: string;
@@ -24,6 +25,8 @@ const RecentResumes = () => {
   const navigate = useNavigate();
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploadDateFilter, setUploadDateFilter] = useState<UploadDateFilterValue>('all');
+  const [totalCount, setTotalCount] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -36,16 +39,36 @@ const RecentResumes = () => {
 
     const fetchRecentResumes = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('profiles')
-          .select('id, full_name, resume_file_url, created_at, job_title, email, phone_number, location')
+          .select('id, full_name, resume_file_url, created_at, job_title, email, phone_number, location', { count: 'exact' })
           .eq('user_id', user.id)
-          .not('resume_file_url', 'is', null)
+          .not('resume_file_url', 'is', null);
+
+        if (uploadDateFilter !== 'all') {
+          const now = new Date();
+          const from = new Date(now);
+
+          if (uploadDateFilter === '24h') {
+            from.setDate(now.getDate() - 1);
+          } else if (uploadDateFilter === '3d') {
+            from.setDate(now.getDate() - 3);
+          } else if (uploadDateFilter === '7d') {
+            from.setDate(now.getDate() - 7);
+          } else if (uploadDateFilter === '30d') {
+            from.setDate(now.getDate() - 30);
+          }
+
+          query = query.gte('created_at', from.toISOString());
+        }
+
+        const { data, error, count } = await query
           .order('created_at', { ascending: false })
           .limit(50);
 
         if (error) throw error;
         setResumes(data || []);
+        setTotalCount(count || 0);
       } catch (error) {
         console.error('Error fetching recent resumes:', error);
       } finally {
@@ -75,7 +98,7 @@ const RecentResumes = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, uploadDateFilter]);
 
   const handleViewResume = (url: string) => {
     window.open(url, '_blank');
@@ -122,6 +145,14 @@ const RecentResumes = () => {
           <p className="text-muted-foreground">
             View all recently uploaded resumes
           </p>
+        </div>
+
+        <div className="mb-4 text-sm text-muted-foreground">
+          Showing {resumes.length} of {totalCount} resume(s) matching current filters
+        </div>
+
+        <div className="mb-6 max-w-xs">
+          <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
         </div>
 
         {resumes.length === 0 ? (

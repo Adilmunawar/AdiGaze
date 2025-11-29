@@ -11,6 +11,7 @@ import { Loader2, ArrowLeft, User, Lock, Upload } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import Footer from '@/components/Footer';
+import AppSidebarLayout from '@/components/AppSidebarLayout';
 
 const Settings = () => {
   const { user, updateProfile, updatePassword, signOut, loading } = useAuth();

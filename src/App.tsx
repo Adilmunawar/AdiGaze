@@ -11,9 +11,10 @@ import SearchHistory from "./pages/SearchHistory";
 import Candidates from "./pages/Candidates";
 import RecentResumes from "./pages/RecentResumes";
 import NotFound from "./pages/NotFound";
-
+import DeveloperSettings from "./pages/DeveloperSettings";
+ 
 const queryClient = new QueryClient();
-
+ 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/developer-settings" element={<DeveloperSettings />} />
           <Route path="/bookmarks" element={<Bookmarks />} />
           <Route path="/history" element={<SearchHistory />} />
           <Route path="/candidates" element={<Candidates />} />
@@ -35,5 +37,5 @@ const App = () => (
     </TooltipProvider>
   </QueryClientProvider>
 );
-
+ 
 export default App;
