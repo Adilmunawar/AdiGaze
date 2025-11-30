@@ -14,3 +14,18 @@ verify_jwt = true
 
 [functions.enhance-description]
 verify_jwt = true
+
+[functions.google-drive-auth-url]
+verify_jwt = true
+
+[functions.google-drive-oauth]
+verify_jwt = false
+
+[functions.google-drive-backup]
+verify_jwt = true
+
+[functions.google-drive-restore]
+verify_jwt = true
+
+[functions.totp-auth]
+verify_jwt = true

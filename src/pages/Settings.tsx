@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import Footer from '@/components/Footer';
 import AppSidebarLayout from '@/components/AppSidebarLayout';
+import { TwoFactorSetup } from '@/components/TwoFactorSetup';
 
 const Settings = () => {
   const { user, updateProfile, updatePassword, signOut, loading } = useAuth();
@@ -293,6 +294,9 @@ const Settings = () => {
               </TabsContent>
 
               <TabsContent value="security" className="space-y-6">
+                {/* Two-Factor Authentication */}
+                <TwoFactorSetup />
+
                 <Card className="shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
                   <CardHeader>
                     <CardTitle>Change Password</CardTitle>
