@@ -50,6 +50,33 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_settings: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          receiving_email: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          receiving_email: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          receiving_email?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       candidate_bookmarks: {
         Row: {
           candidate_id: string
@@ -162,6 +189,48 @@ export type Database = {
           id?: string
           label?: string | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      external_submissions: {
+        Row: {
+          admin_user_id: string
+          candidate_email: string | null
+          candidate_name: string
+          candidate_phone: string | null
+          created_at: string
+          id: string
+          interested_job: string
+          notes: string | null
+          parsed_data: Json | null
+          resume_file_url: string
+          status: string
+        }
+        Insert: {
+          admin_user_id: string
+          candidate_email?: string | null
+          candidate_name: string
+          candidate_phone?: string | null
+          created_at?: string
+          id?: string
+          interested_job: string
+          notes?: string | null
+          parsed_data?: Json | null
+          resume_file_url: string
+          status?: string
+        }
+        Update: {
+          admin_user_id?: string
+          candidate_email?: string | null
+          candidate_name?: string
+          candidate_phone?: string | null
+          created_at?: string
+          id?: string
+          interested_job?: string
+          notes?: string | null
+          parsed_data?: Json | null
+          resume_file_url?: string
+          status?: string
         }
         Relationships: []
       }

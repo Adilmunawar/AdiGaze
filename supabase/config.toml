@@ -29,3 +29,6 @@ verify_jwt = true
 
 [functions.totp-auth]
 verify_jwt = true
+
+[functions.receive-external-resume]
+verify_jwt = false

@@ -109,13 +109,7 @@ const ProfileSettings = () => {
 
   return (
     <AppSidebarLayout>
-      <div className="min-h-screen relative overflow-hidden flex flex-col">
-        <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
-          <div className="absolute inset-0 bg-mesh" />
-          <div className="absolute top-20 right-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-float" />
-          <div className="absolute bottom-20 left-1/4 w-[500px] h-[500px] bg-secondary/10 rounded-full blur-3xl animate-float-delayed" />
-        </div>
-
+      <div className="min-h-screen flex flex-col">
         <div className="container mx-auto px-4 py-8 max-w-4xl relative z-10 flex-1">
           <div className="space-y-6 animate-fade-in">
             <div className="text-center md:text-left space-y-2">

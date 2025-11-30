@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import Footer from "@/components/Footer";
 import AppSidebarLayout from "@/components/AppSidebarLayout";
-import { Loader2, ArrowLeft, Database, Download, RotateCcw, Trash2, Cloud } from "lucide-react";
+import { Loader2, ArrowLeft, Database, Download, RotateCcw, Trash2, Cloud, Inbox, Copy, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 
 interface DataBackup {
   id: string;
@@ -54,6 +55,14 @@ const DeveloperSettings = () => {
   const [isSyncingToDrive, setIsSyncingToDrive] = useState(false);
   const [isRestoringFromDrive, setIsRestoringFromDrive] = useState(false);
   const [syncToDrive, setSyncToDrive] = useState(false);
+  
+  // External submissions admin settings
+  const [adminEmail, setAdminEmail] = useState("");
+  const [isReceivingActive, setIsReceivingActive] = useState(true);
+  const [hasAdminSettings, setHasAdminSettings] = useState(false);
+  const [isSavingAdminSettings, setIsSavingAdminSettings] = useState(false);
+  const [copiedEndpoint, setCopiedEndpoint] = useState(false);
+  
   useEffect(() => {
     if (!loading && !user) {
       navigate("/auth");
@@ -64,9 +73,89 @@ const DeveloperSettings = () => {
     if (user) {
       void loadBackups();
       void checkDriveConnection();
+      void loadAdminSettings();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  const loadAdminSettings = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("admin_settings")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!error && data) {
+      setAdminEmail(data.receiving_email || "");
+      setIsReceivingActive(data.is_active);
+      setHasAdminSettings(true);
+    }
+  };
+
+  const saveAdminSettings = async () => {
+    if (!user || !adminEmail.trim()) {
+      toast({
+        title: "Invalid email",
+        description: "Please enter a valid email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingAdminSettings(true);
+    try {
+      if (hasAdminSettings) {
+        // Update existing settings
+        const { error } = await supabase
+          .from("admin_settings")
+          .update({
+            receiving_email: adminEmail.toLowerCase().trim(),
+            is_active: isReceivingActive,
+          })
+          .eq("user_id", user.id);
+
+        if (error) throw error;
+      } else {
+        // Insert new settings
+        const { error } = await supabase
+          .from("admin_settings")
+          .insert({
+            user_id: user.id,
+            receiving_email: adminEmail.toLowerCase().trim(),
+            is_active: isReceivingActive,
+          });
+
+        if (error) throw error;
+        setHasAdminSettings(true);
+      }
+
+      toast({
+        title: "Settings saved",
+        description: "External submission settings have been updated.",
+      });
+    } catch (err: any) {
+      console.error("Error saving admin settings:", err);
+      toast({
+        title: "Failed to save settings",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingAdminSettings(false);
+    }
+  };
+
+  const copyEndpointUrl = () => {
+    const url = `https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/receive-external-resume`;
+    navigator.clipboard.writeText(url);
+    setCopiedEndpoint(true);
+    setTimeout(() => setCopiedEndpoint(false), 2000);
+    toast({
+      title: "Copied!",
+      description: "API endpoint URL copied to clipboard.",
+    });
+  };
 
   const checkDriveConnection = async () => {
     if (!user) return;
@@ -559,11 +648,7 @@ const DeveloperSettings = () => {
 
   return (
     <AppSidebarLayout>
-      <div className="relative overflow-hidden flex flex-col min-h-screen">
-        <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
-          <div className="absolute inset-0 bg-mesh" />
-        </div>
-
+      <div className="flex flex-col min-h-screen">
         <div className="container mx-auto px-4 py-8 max-w-5xl relative z-10 flex-1">
           <main className="space-y-6">
             <header className="space-y-2">
@@ -677,6 +762,97 @@ const DeveloperSettings = () => {
                         </p>
                       )}
                     </>
+                  )}
+                </CardContent>
+              </Card>
+            </section>
+
+            {/* External Submissions Configuration */}
+            <section className="space-y-6">
+              <Card className="shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Inbox className="h-5 w-5" />
+                    External Resume Submissions
+                    {hasAdminSettings && isReceivingActive && (
+                      <Badge className="ml-2 bg-green-500/20 text-green-600 border-green-500/30">Active</Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription>
+                    Configure your account to receive resume submissions from your external landing page.
+                    Candidates can submit their resumes directly to your portal.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-email" className="text-sm font-medium">
+                      Receiving Email Address
+                    </Label>
+                    <Input
+                      id="admin-email"
+                      type="email"
+                      placeholder="e.g., admin@company.com"
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This email identifies you as the receiving admin. Use it in your landing page form.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label htmlFor="receiving-active" className="text-sm font-medium">
+                        Accept Submissions
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Toggle off to temporarily stop receiving new submissions.
+                      </p>
+                    </div>
+                    <Switch
+                      id="receiving-active"
+                      checked={isReceivingActive}
+                      onCheckedChange={setIsReceivingActive}
+                    />
+                  </div>
+
+                  <Button
+                    onClick={saveAdminSettings}
+                    disabled={isSavingAdminSettings || !adminEmail.trim()}
+                    className="w-full"
+                  >
+                    {isSavingAdminSettings ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Settings"
+                    )}
+                  </Button>
+
+                  {hasAdminSettings && (
+                    <div className="pt-4 border-t border-border/30 space-y-3">
+                      <Label className="text-sm font-medium">API Endpoint for Landing Page</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          readOnly
+                          value="https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/receive-external-resume"
+                          className="text-xs font-mono bg-muted/50"
+                        />
+                        <Button variant="outline" size="icon" onClick={copyEndpointUrl}>
+                          {copiedEndpoint ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Use this endpoint in your Next.js landing page to submit resumes. 
+                        Pass <code className="bg-muted px-1 rounded">admin_email={adminEmail || "your-email"}</code> in the form data.
+                      </p>
+                    </div>
                   )}
                 </CardContent>
               </Card>

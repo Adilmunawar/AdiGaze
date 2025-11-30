@@ -128,7 +128,7 @@ export default function Bookmarks() {
   if (isLoading) {
     return (
       <AppSidebarLayout>
-        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
+        <div className="flex min-h-screen items-center justify-center">
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="text-muted-foreground">Loading bookmarks...</p>
@@ -140,7 +140,7 @@ export default function Bookmarks() {
 
   return (
     <AppSidebarLayout>
-      <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <div className="container mx-auto px-4 py-8 max-w-7xl flex-1">
           <div className="flex items-center gap-4 mb-8">
             <div>

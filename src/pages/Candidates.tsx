@@ -364,7 +364,7 @@ export default function Candidates() {
 
   return (
     <AppSidebarLayout>
-      <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-primary/5 flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <div className="container mx-auto px-4 py-8 flex-1">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8">
           <div>
