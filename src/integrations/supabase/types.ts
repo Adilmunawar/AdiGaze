@@ -302,6 +302,7 @@ export type Database = {
           resume_text: string | null
           sector: string | null
           skills: string[] | null
+          source: string
           user_id: string | null
           years_of_experience: number | null
         }
@@ -321,6 +322,7 @@ export type Database = {
           resume_text?: string | null
           sector?: string | null
           skills?: string[] | null
+          source?: string
           user_id?: string | null
           years_of_experience?: number | null
         }
@@ -340,6 +342,7 @@ export type Database = {
           resume_text?: string | null
           sector?: string | null
           skills?: string[] | null
+          source?: string
           user_id?: string | null
           years_of_experience?: number | null
         }
@@ -403,6 +406,7 @@ export type Database = {
           resume_text: string | null
           sector: string | null
           skills: string[] | null
+          source: string
           user_id: string | null
           years_of_experience: number | null
         }[]

@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileText, ExternalLink, Clock, Loader2, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { FileText, ExternalLink, Clock, Loader2, Upload, ChevronLeft, ChevronRight, Globe } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import Footer from '@/components/Footer';
@@ -19,6 +22,7 @@ interface Resume {
   email: string | null;
   phone_number: string | null;
   location: string | null;
+  source: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -29,6 +33,7 @@ const RecentResumes = () => {
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadDateFilter, setUploadDateFilter] = useState<UploadDateFilterValue>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -43,7 +48,7 @@ const RecentResumes = () => {
   useEffect(() => {
     // Reset to page 1 when filter changes
     setCurrentPage(1);
-  }, [uploadDateFilter]);
+  }, [uploadDateFilter, sourceFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -53,7 +58,7 @@ const RecentResumes = () => {
       try {
         let query = supabase
           .from('profiles')
-          .select('id, full_name, resume_file_url, created_at, job_title, email, phone_number, location', { count: 'exact' })
+          .select('id, full_name, resume_file_url, created_at, job_title, email, phone_number, location, source', { count: 'exact' })
           .eq('user_id', user.id)
           .not('resume_file_url', 'is', null);
 
@@ -72,6 +77,11 @@ const RecentResumes = () => {
           }
 
           query = query.gte('created_at', from.toISOString());
+        }
+
+        // Apply source filter
+        if (sourceFilter !== 'all') {
+          query = query.eq('source', sourceFilter);
         }
 
         const from = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -113,7 +123,7 @@ const RecentResumes = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, uploadDateFilter, currentPage]);
+  }, [user, uploadDateFilter, sourceFilter, currentPage]);
 
   const handleViewResume = (url: string) => {
     window.open(url, '_blank');
@@ -160,8 +170,35 @@ const RecentResumes = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div className="max-w-xs">
-              <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
+            <div className="flex flex-wrap gap-4">
+              <div className="w-48">
+                <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
+              </div>
+              <div className="w-48">
+                <Label htmlFor="source-filter" className="text-sm font-medium mb-2 block">
+                  Resume Source
+                </Label>
+                <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                  <SelectTrigger id="source-filter">
+                    <SelectValue placeholder="All Sources" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="internal">
+                      <div className="flex items-center gap-2">
+                        <Upload className="h-3 w-3" />
+                        Internal (Uploaded)
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="external">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-3 w-3" />
+                        External (Landing Page)
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="text-sm text-muted-foreground">
               {totalCount > 0 ? (
@@ -200,9 +237,17 @@ const RecentResumes = () => {
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <FileText className="h-6 w-6 text-primary flex-shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <CardTitle className="text-lg truncate">
-                              {resume.full_name || 'Unknown'}
-                            </CardTitle>
+                            <div className="flex items-center gap-2">
+                              <CardTitle className="text-lg truncate">
+                                {resume.full_name || 'Unknown'}
+                              </CardTitle>
+                              {resume.source === 'external' && (
+                                <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-blue-500/10 text-blue-600 border-blue-500/30">
+                                  <Globe className="h-2.5 w-2.5 mr-1" />
+                                  External
+                                </Badge>
+                              )}
+                            </div>
                             <p className="text-sm text-muted-foreground">
                               {resume.job_title || 'No title specified'}
                             </p>

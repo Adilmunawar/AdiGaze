@@ -143,15 +143,26 @@ serve(async (req) => {
 
     const resumeFileUrl = urlData.publicUrl;
 
-    // Parse resume using Gemini (simplified version)
+    // Parse resume using Gemini
     let parsedData: any = null;
     try {
       const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-      if (geminiApiKey && resumeFile.type === "application/pdf") {
+      console.log("GEMINI_API_KEY available:", !!geminiApiKey);
+      console.log("File type:", resumeFile.type);
+      
+      // Support both PDF and DOCX
+      const supportedForParsing = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ];
+      
+      if (geminiApiKey && supportedForParsing.includes(resumeFile.type)) {
         const fileBase64 = btoa(
           new Uint8Array(fileBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
         );
 
+        console.log("Calling Gemini API for resume parsing...");
+        
         const geminiResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
           {
@@ -175,9 +186,10 @@ serve(async (req) => {
                         "phone": "string or null",
                         "location": "string or null",
                         "skills": ["array of skills"],
-                        "experience_years": "number or null",
+                        "experience_years": number or null,
                         "education": "string summary or null",
                         "job_title": "most recent job title or null",
+                        "experience": "work experience summary or null",
                         "summary": "brief professional summary"
                       }
                       Return ONLY valid JSON, no markdown or explanation.`,
@@ -189,16 +201,26 @@ serve(async (req) => {
           }
         );
 
+        console.log("Gemini response status:", geminiResponse.status);
+        
         if (geminiResponse.ok) {
           const geminiData = await geminiResponse.json();
           const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+          console.log("Gemini text content:", textContent?.substring(0, 200));
+          
           if (textContent) {
             const jsonMatch = textContent.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
               parsedData = JSON.parse(jsonMatch[0]);
+              console.log("Successfully parsed resume data:", JSON.stringify(parsedData).substring(0, 200));
             }
           }
+        } else {
+          const errorText = await geminiResponse.text();
+          console.error("Gemini API error:", geminiResponse.status, errorText);
         }
+      } else {
+        console.log("Skipping parsing - no API key or unsupported file type");
       }
     } catch (parseError) {
       console.error("Resume parsing error (non-fatal):", parseError);

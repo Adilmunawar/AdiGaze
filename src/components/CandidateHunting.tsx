@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase, Trash2, Calendar } from 'lucide-react';
+import { Search, Sparkles, Award, MapPin, Download, X, Bookmark, Briefcase, Trash2, Calendar, Globe, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -77,6 +77,7 @@ export const CandidateHunting = () => {
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
   const [filteredCandidateCount, setFilteredCandidateCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const abortControllerRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
   
@@ -97,7 +98,7 @@ export const CandidateHunting = () => {
   // Update filtered candidate count when filters change
   useEffect(() => {
     fetchFilteredCandidateCount();
-  }, [timeFilter, customDateRange, selectedJobTitles]);
+  }, [timeFilter, customDateRange, selectedJobTitles, sourceFilter]);
 
   const fetchJobTitles = async () => {
     try {
@@ -173,6 +174,11 @@ export const CandidateHunting = () => {
       // Apply job title filter
       if (selectedJobTitles.length > 0) {
         query = query.in('job_title', selectedJobTitles);
+      }
+
+      // Apply source filter
+      if (sourceFilter !== 'all') {
+        query = query.eq('source', sourceFilter);
       }
 
       const { count, error } = await query;
@@ -951,6 +957,12 @@ export const CandidateHunting = () => {
         query = query.in('job_title', selectedJobTitles);
       }
 
+      // Apply source filter if selected
+      if (sourceFilter !== 'all') {
+        query = query.eq('source', sourceFilter);
+        addLog('info', `Filtering ${sourceFilter === 'external' ? 'external (landing page)' : 'internal (uploaded)'} candidates only`);
+      }
+
       const { data: profileRows, error: profilesError } = await query
         .order('created_at', { ascending: false });
 
@@ -1181,6 +1193,34 @@ export const CandidateHunting = () => {
                 </Badge>
               </div>
             )}
+          </div>
+
+          <div className="space-y-3 p-4 bg-secondary/5 rounded-lg border border-primary/10">
+            <div className="flex items-center gap-2">
+              <Globe className="h-5 w-5 text-primary" />
+              <h4 className="font-semibold text-foreground">Filter by Resume Source (Optional)</h4>
+            </div>
+            <p className="text-sm text-muted-foreground">Match only candidates from internal uploads or external landing page submissions</p>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="w-full bg-background/50">
+                <SelectValue placeholder="Select source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sources (Default)</SelectItem>
+                <SelectItem value="internal">
+                  <div className="flex items-center gap-2">
+                    <Upload className="h-3 w-3" />
+                    Internal (Uploaded by Admin)
+                  </div>
+                </SelectItem>
+                <SelectItem value="external">
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-3 w-3" />
+                    External (Landing Page)
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {availableJobTitles.length > 0 && (

@@ -121,19 +121,22 @@ const ExternalSubmissions = () => {
     setIsProcessing(submission.id);
 
     try {
-      // Insert into profiles table
+      // Insert into profiles table - prioritize parsed data from resume over form data
       const profileData: any = {
         user_id: user.id,
+        // Use parsed data first (from resume), fallback to form submission data
         full_name: submission.parsed_data?.full_name || submission.candidate_name,
         email: submission.parsed_data?.email || submission.candidate_email,
         phone_number: submission.parsed_data?.phone || submission.candidate_phone,
-        location: submission.parsed_data?.location,
+        location: submission.parsed_data?.location || null,
         skills: submission.parsed_data?.skills || [],
-        years_of_experience: submission.parsed_data?.experience_years,
-        education: submission.parsed_data?.education,
+        years_of_experience: submission.parsed_data?.experience_years || null,
+        education: submission.parsed_data?.education || null,
         job_title: submission.parsed_data?.job_title || submission.interested_job,
         resume_file_url: submission.resume_file_url,
-        resume_text: submission.parsed_data?.summary,
+        resume_text: submission.parsed_data?.summary || null,
+        // Mark as external source
+        source: 'external',
       };
 
       const { error: profileError } = await supabase

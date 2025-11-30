@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, Mail, Phone, MapPin, Briefcase, ExternalLink, Trash2, Download, FileSpreadsheet } from 'lucide-react';
+import { FileText, Mail, Phone, MapPin, Briefcase, ExternalLink, Trash2, Download, FileSpreadsheet, Globe, Upload } from 'lucide-react';
 import { Tables } from '@/integrations/supabase/types';
 import Footer from '@/components/Footer';
 import * as XLSX from 'xlsx';
@@ -49,16 +50,17 @@ export default function Candidates() {
   const [experienceFilter, setExperienceFilter] = useState<string>('all');
   const [locations, setLocations] = useState<string[]>([]);
   const [uploadDateFilter, setUploadDateFilter] = useState<UploadDateFilterValue>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     fetchProfiles();
-  }, [currentPage, searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter]);
+  }, [currentPage, searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter, sourceFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
     setSelectedCandidates(new Set());
-  }, [searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter]);
+  }, [searchTerm, selectedJobTitle, locationFilter, experienceFilter, uploadDateFilter, sourceFilter]);
 
   const fetchProfiles = async () => {
     setLoading(true);
@@ -66,7 +68,7 @@ export default function Candidates() {
       // Build the query
       let query = supabase
         .from('profiles')
-        .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url, avatar_url, created_at, user_id', { count: 'exact' });
+        .select('id, full_name, email, phone_number, location, job_title, years_of_experience, sector, skills, education, resume_file_url, avatar_url, created_at, user_id, source', { count: 'exact' });
 
       // Apply filters
       if (searchTerm) {
@@ -109,6 +111,11 @@ export default function Candidates() {
         }
 
         query = query.gte('created_at', from.toISOString());
+      }
+
+      // Apply source filter
+      if (sourceFilter !== 'all') {
+        query = query.eq('source', sourceFilter);
       }
 
       // Apply pagination and ordering
@@ -420,7 +427,7 @@ export default function Candidates() {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div>
                 <Label htmlFor="job-title" className="text-sm font-medium mb-2 block">
                   Job Title
@@ -478,9 +485,35 @@ export default function Candidates() {
               </div>
 
               <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
+
+              <div>
+                <Label htmlFor="source" className="text-sm font-medium mb-2 block">
+                  Resume Source
+                </Label>
+                <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                  <SelectTrigger id="source">
+                    <SelectValue placeholder="All Sources" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="internal">
+                      <div className="flex items-center gap-2">
+                        <Upload className="h-3 w-3" />
+                        Internal (Uploaded)
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="external">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-3 w-3" />
+                        External (Landing Page)
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {(searchTerm || selectedJobTitle !== 'all' || locationFilter !== 'all' || experienceFilter !== 'all' || uploadDateFilter !== 'all') && (
+            {(searchTerm || selectedJobTitle !== 'all' || locationFilter !== 'all' || experienceFilter !== 'all' || uploadDateFilter !== 'all' || sourceFilter !== 'all') && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -490,6 +523,7 @@ export default function Candidates() {
                   setLocationFilter('all');
                   setExperienceFilter('all');
                   setUploadDateFilter('all');
+                  setSourceFilter('all');
                 }}
                 className="text-sm"
               >
@@ -568,9 +602,17 @@ export default function Candidates() {
                             <FileText className="h-5 w-5 text-primary" />
                           </div>
                           <div className="flex-1">
-                            <h3 className="text-xl font-bold text-foreground">
-                              {profile.full_name || 'Unknown'}
-                            </h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-xl font-bold text-foreground">
+                                {profile.full_name || 'Unknown'}
+                              </h3>
+                              {(profile as any).source === 'external' && (
+                                <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-blue-500/10 text-blue-600 border-blue-500/30">
+                                  <Globe className="h-2.5 w-2.5 mr-1" />
+                                  External
+                                </Badge>
+                              )}
+                            </div>
                             {profile.job_title && (
                               <div className="flex items-center gap-2 mt-1">
                                 <Briefcase className="h-4 w-4 text-muted-foreground" />
