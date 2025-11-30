@@ -13,6 +13,7 @@ import {
   History,
   Menu,
   LogOut,
+  Scale,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -31,6 +32,7 @@ const mainNavItems = [
 const settingsNavItems = [
   { label: 'Settings', icon: Settings, href: '/settings' },
   { label: 'Dev Settings', icon: DatabaseBackup, href: '/developer-settings' },
+  { label: 'Legal', icon: Scale, href: '/legal' },
 ];
 
 export const AppSidebarLayout: React.FC<AppSidebarLayoutProps> = ({ children }) => {

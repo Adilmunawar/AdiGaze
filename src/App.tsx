@@ -12,6 +12,7 @@ import Candidates from "./pages/Candidates";
 import RecentResumes from "./pages/RecentResumes";
 import NotFound from "./pages/NotFound";
 import DeveloperSettings from "./pages/DeveloperSettings";
+import Legal from "./pages/Legal";
  
 const queryClient = new QueryClient();
  
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/auth" element={<Auth />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/developer-settings" element={<DeveloperSettings />} />
+          <Route path="/legal" element={<Legal />} />
           <Route path="/bookmarks" element={<Bookmarks />} />
           <Route path="/history" element={<SearchHistory />} />
           <Route path="/candidates" element={<Candidates />} />

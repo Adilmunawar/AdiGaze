@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Bell, CheckCheck } from 'lucide-react';
@@ -17,23 +17,47 @@ interface Notification {
   type: 'search' | 'upload';
   message: string;
   created_at: string;
-  read?: boolean;
+  read: boolean;
 }
+
+const getLastReadTimestamp = (userId: string): number => {
+  const stored = localStorage.getItem(`notifications_last_read_${userId}`);
+  return stored ? parseInt(stored, 10) : 0;
+};
+
+const setLastReadTimestamp = (userId: string, timestamp: number) => {
+  localStorage.setItem(`notifications_last_read_${userId}`, timestamp.toString());
+};
 
 export const NotificationBell = () => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [readNotifications, setReadNotifications] = useState<Set<string>>(new Set());
+  const [lastReadTime, setLastReadTime] = useState<number>(0);
+
+  const processNotifications = useCallback((
+    searchNotifications: Omit<Notification, 'read'>[],
+    uploadNotifications: Omit<Notification, 'read'>[],
+    lastRead: number
+  ) => {
+    const allNotifications = [...searchNotifications, ...uploadNotifications]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 15)
+      .map(n => ({
+        ...n,
+        read: new Date(n.created_at).getTime() <= lastRead
+      }));
+
+    setNotifications(allNotifications);
+    setUnreadCount(allNotifications.filter(n => !n.read).length);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
 
-    // Load read notifications from localStorage
-    const storedRead = localStorage.getItem(`notifications_read_${user.id}`);
-    const initialReadSet = storedRead ? new Set<string>(JSON.parse(storedRead)) : new Set<string>();
-    setReadNotifications(initialReadSet);
+    // Load last read timestamp from localStorage
+    const storedLastRead = getLastReadTimestamp(user.id);
+    setLastReadTime(storedLastRead);
 
     const fetchNotifications = async () => {
       try {
@@ -54,31 +78,21 @@ export const NotificationBell = () => {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        const searchNotifications: Notification[] = (searches || []).map((s) => ({
+        const searchNotifications = (searches || []).map((s) => ({
           id: `search-${s.id}`,
-          type: 'search',
+          type: 'search' as const,
           message: `New search completed with ${s.total_candidates} candidates`,
           created_at: s.created_at,
         }));
 
-        const uploadNotifications: Notification[] = (uploads || []).map((u) => ({
+        const uploadNotifications = (uploads || []).map((u) => ({
           id: `upload-${u.id}`,
-          type: 'upload',
+          type: 'upload' as const,
           message: `Resume uploaded: ${u.full_name || 'Unknown'}`,
           created_at: u.created_at,
         }));
 
-        const allNotifications = [...searchNotifications, ...uploadNotifications]
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 15)
-          .map(n => ({
-            ...n,
-            read: initialReadSet.has(n.id)
-          }));
-
-        setNotifications(allNotifications);
-        setTotalCount(allNotifications.length);
-        setUnreadCount(allNotifications.filter(n => !n.read).length);
+        processNotifications(searchNotifications, uploadNotifications, storedLastRead);
       } catch (error) {
         console.error('Error fetching notifications:', error);
       }
@@ -124,14 +138,17 @@ export const NotificationBell = () => {
       supabase.removeChannel(searchChannel);
       supabase.removeChannel(uploadChannel);
     };
-  }, [user]);
+  }, [user, processNotifications]);
 
   const markAllAsRead = () => {
-    const allIds = new Set(notifications.map(n => n.id));
-    setReadNotifications(allIds);
-    localStorage.setItem(`notifications_read_${user?.id}`, JSON.stringify([...allIds]));
-    setUnreadCount(0);
+    if (!user) return;
+    
+    const now = Date.now();
+    setLastReadTimestamp(user.id, now);
+    setLastReadTime(now);
     setNotifications(notifications.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+    
     toast({
       title: "All notifications marked as read",
       duration: 2000,

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileText, ExternalLink, Clock, Loader2, Upload } from 'lucide-react';
+import { FileText, ExternalLink, Clock, Loader2, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import Footer from '@/components/Footer';
@@ -21,6 +21,8 @@ interface Resume {
   location: string | null;
 }
 
+const ITEMS_PER_PAGE = 10;
+
 const RecentResumes = () => {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -28,6 +30,9 @@ const RecentResumes = () => {
   const [loading, setLoading] = useState(true);
   const [uploadDateFilter, setUploadDateFilter] = useState<UploadDateFilterValue>('all');
   const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -36,9 +41,15 @@ const RecentResumes = () => {
   }, [user, authLoading, navigate]);
 
   useEffect(() => {
+    // Reset to page 1 when filter changes
+    setCurrentPage(1);
+  }, [uploadDateFilter]);
+
+  useEffect(() => {
     if (!user) return;
 
     const fetchRecentResumes = async () => {
+      setLoading(true);
       try {
         let query = supabase
           .from('profiles')
@@ -63,9 +74,12 @@ const RecentResumes = () => {
           query = query.gte('created_at', from.toISOString());
         }
 
+        const from = (currentPage - 1) * ITEMS_PER_PAGE;
+        const to = from + ITEMS_PER_PAGE - 1;
+
         const { data, error, count } = await query
           .order('created_at', { ascending: false })
-          .limit(50);
+          .range(from, to);
 
         if (error) throw error;
         setResumes(data || []);
@@ -99,10 +113,17 @@ const RecentResumes = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, uploadDateFilter]);
+  }, [user, uploadDateFilter, currentPage]);
 
   const handleViewResume = (url: string) => {
     window.open(url, '_blank');
+  };
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   if (authLoading || loading) {
@@ -118,6 +139,9 @@ const RecentResumes = () => {
   if (!user) {
     return null;
   }
+
+  const startItem = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const endItem = Math.min(currentPage * ITEMS_PER_PAGE, totalCount);
 
   return (
     <AppSidebarLayout>
@@ -142,12 +166,17 @@ const RecentResumes = () => {
             </p>
           </div>
 
-          <div className="mb-4 text-sm text-muted-foreground">
-            Showing {resumes.length} of {totalCount} resume(s) matching current filters
-          </div>
-
-          <div className="mb-6 max-w-xs">
-            <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div className="max-w-xs">
+              <UploadDateFilter value={uploadDateFilter} onChange={setUploadDateFilter} />
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {totalCount > 0 ? (
+                <>Showing {startItem}-{endItem} of {totalCount} resume(s)</>
+              ) : (
+                'No resumes found'
+              )}
+            </div>
           </div>
 
           {resumes.length === 0 ? (
@@ -166,69 +195,127 @@ const RecentResumes = () => {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4">
-              {resumes.map((resume) => (
-                <Card
-                  key={resume.id}
-                  className="bg-card/60 backdrop-blur-sm border-border/50 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300 hover:border-primary/40"
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <FileText className="h-6 w-6 text-primary flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <CardTitle className="text-lg truncate">
-                            {resume.full_name || 'Unknown'}
-                          </CardTitle>
-                          <p className="text-sm text-muted-foreground">
-                            {resume.job_title || 'No title specified'}
-                          </p>
+            <>
+              <div className="grid gap-4">
+                {resumes.map((resume) => (
+                  <Card
+                    key={resume.id}
+                    className="bg-card/60 backdrop-blur-sm border-border/50 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-elegant)] transition-all duration-300 hover:border-primary/40"
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <FileText className="h-6 w-6 text-primary flex-shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="text-lg truncate">
+                              {resume.full_name || 'Unknown'}
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                              {resume.job_title || 'No title specified'}
+                            </p>
+                          </div>
+                        </div>
+                        {resume.resume_file_url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewResume(resume.resume_file_url!)}
+                            className="flex-shrink-0 gap-2 hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all duration-300"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            View Resume
+                          </Button>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        {resume.email && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <span className="font-medium">Email:</span>
+                            <span className="truncate">{resume.email}</span>
+                          </div>
+                        )}
+                        {resume.phone_number && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <span className="font-medium">Phone:</span>
+                            <span>{resume.phone_number}</span>
+                          </div>
+                        )}
+                        {resume.location && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <span className="font-medium">Location:</span>
+                            <span className="truncate">{resume.location}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Clock className="h-4 w-4 flex-shrink-0" />
+                          <span className="text-xs">
+                            Added {formatDistanceToNow(new Date(resume.created_at), { addSuffix: true })}
+                          </span>
                         </div>
                       </div>
-                      {resume.resume_file_url && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewResume(resume.resume_file_url!)}
-                          className="flex-shrink-0 gap-2 hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all duration-300"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                          View Resume
-                        </Button>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                      {resume.email && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <span className="font-medium">Email:</span>
-                          <span className="truncate">{resume.email}</span>
-                        </div>
-                      )}
-                      {resume.phone_number && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <span className="font-medium">Phone:</span>
-                          <span>{resume.phone_number}</span>
-                        </div>
-                      )}
-                      {resume.location && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <span className="font-medium">Location:</span>
-                          <span className="truncate">{resume.location}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Clock className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-xs">
-                          Added {formatDistanceToNow(new Date(resume.created_at), { addSuffix: true })}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-8">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => goToPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="gap-1"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(page => {
+                        // Show first, last, current, and pages around current
+                        if (page === 1 || page === totalPages) return true;
+                        if (Math.abs(page - currentPage) <= 1) return true;
+                        return false;
+                      })
+                      .map((page, index, arr) => {
+                        // Add ellipsis if there's a gap
+                        const showEllipsisBefore = index > 0 && page - arr[index - 1] > 1;
+                        return (
+                          <div key={page} className="flex items-center gap-1">
+                            {showEllipsisBefore && (
+                              <span className="px-2 text-muted-foreground">...</span>
+                            )}
+                            <Button
+                              variant={currentPage === page ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => goToPage(page)}
+                              className="w-9 h-9"
+                            >
+                              {page}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => goToPage(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="gap-1"
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
         <Footer />
