@@ -5,8 +5,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import {
   Home,
-  Settings,
-  DatabaseBackup,
+  User,
+  Shield,
+  Code,
   Users,
   Clock,
   Bookmark,
@@ -30,8 +31,9 @@ const mainNavItems = [
 ];
 
 const settingsNavItems = [
-  { label: 'Settings', icon: Settings, href: '/settings' },
-  { label: 'Dev Settings', icon: DatabaseBackup, href: '/developer-settings' },
+  { label: 'Profile', icon: User, href: '/profile-settings' },
+  { label: 'Security', icon: Shield, href: '/security' },
+  { label: 'Dev Options', icon: Code, href: '/developer-settings' },
   { label: 'Legal', icon: Scale, href: '/legal' },
 ];
 
