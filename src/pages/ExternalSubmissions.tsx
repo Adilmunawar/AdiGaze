@@ -8,7 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { toast as sonnerToast } from "sonner";
 import AppSidebarLayout from "@/components/AppSidebarLayout";
+import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Loader2, 
   FileText, 
@@ -25,7 +28,8 @@ import {
   User,
   Calendar,
   MapPin,
-  Sparkles
+  Sparkles,
+  CheckCircle2
 } from "lucide-react";
 import {
   Dialog,
@@ -80,6 +84,8 @@ const ExternalSubmissions = () => {
   const [notes, setNotes] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [processingQueue, setProcessingQueue] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (!loading && !user) {
@@ -116,59 +122,193 @@ const ExternalSubmissions = () => {
     setIsLoading(false);
   };
 
-  const handleAccept = async (submission: ExternalSubmission) => {
-    if (!user) return;
-    setIsProcessing(submission.id);
+  const processSubmission = async (submissionId: string, apiKeyIndex: number = 1) => {
+    const toastId = `processing-${submissionId}`;
+    let progress = 0;
+
+    // Show initial toast with progress
+    sonnerToast.loading(
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="font-medium">Processing resume...</span>
+        </div>
+        <Progress value={progress} className="h-1" />
+      </div>,
+      { id: toastId, duration: Infinity }
+    );
+
+    setProcessingQueue(prev => new Map(prev).set(submissionId, progress));
 
     try {
-      // Insert into profiles table - prioritize parsed data from resume over form data
-      const profileData: any = {
-        user_id: user.id,
-        // Use parsed data first (from resume), fallback to form submission data
-        full_name: submission.parsed_data?.full_name || submission.candidate_name,
-        email: submission.parsed_data?.email || submission.candidate_email,
-        phone_number: submission.parsed_data?.phone || submission.candidate_phone,
-        location: submission.parsed_data?.location || null,
-        skills: submission.parsed_data?.skills || [],
-        years_of_experience: submission.parsed_data?.experience_years || null,
-        education: submission.parsed_data?.education || null,
-        job_title: submission.parsed_data?.job_title || submission.interested_job,
-        resume_file_url: submission.resume_file_url,
-        resume_text: submission.parsed_data?.summary || null,
-        // Mark as external source
-        source: 'external',
-      };
+      // Update progress: downloading
+      progress = 30;
+      sonnerToast.loading(
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="font-medium">Parsing resume with AI...</span>
+          </div>
+          <Progress value={progress} className="h-1" />
+        </div>,
+        { id: toastId, duration: Infinity }
+      );
+      setProcessingQueue(prev => new Map(prev).set(submissionId, progress));
 
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .insert(profileData);
+      // Call the edge function with API key index
+      const { data, error } = await supabase.functions.invoke(
+        'process-external-submission',
+        {
+          body: { submissionId, apiKeyIndex }
+        }
+      );
 
-      if (profileError) throw profileError;
+      if (error) throw error;
 
-      // Update submission status
-      const { error: updateError } = await supabase
+      // Update progress: parsing complete
+      progress = 70;
+      sonnerToast.loading(
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="font-medium">Generating embeddings...</span>
+          </div>
+          <Progress value={progress} className="h-1" />
+        </div>,
+        { id: toastId, duration: Infinity }
+      );
+      setProcessingQueue(prev => new Map(prev).set(submissionId, progress));
+
+      // Small delay to show final progress
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Success
+      progress = 100;
+      setProcessingQueue(prev => new Map(prev).set(submissionId, progress));
+      
+      sonnerToast.success(
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-green-600" />
+          <span className="font-medium">Resume processed successfully!</span>
+        </div>,
+        { id: toastId, duration: 3000 }
+      );
+
+      // Reload submissions after a short delay
+      setTimeout(() => {
+        loadSubmissions();
+        setProcessingQueue(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(submissionId);
+          return newMap;
+        });
+      }, 1000);
+
+    } catch (error: any) {
+      console.error("Error processing submission:", error);
+      sonnerToast.error(
+        <div>
+          <div className="font-medium">Failed to process resume</div>
+          <div className="text-sm text-muted-foreground">{error.message || "Unknown error"}</div>
+        </div>,
+        { id: toastId, duration: 5000 }
+      );
+      setProcessingQueue(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(submissionId);
+        return newMap;
+      });
+    }
+  };
+
+  const handleAccept = async (submission: ExternalSubmission) => {
+    if (!user) return;
+
+    // Update notes if provided
+    if (notes) {
+      const { error: notesError } = await supabase
         .from("external_submissions")
-        .update({ status: "accepted", notes })
+        .update({ notes })
         .eq("id", submission.id);
 
-      if (updateError) throw updateError;
+      if (notesError) console.error("Failed to update notes:", notesError);
+    }
+
+    // Close dialog immediately
+    setIsDetailOpen(false);
+
+    // Start async processing
+    processSubmission(submission.id);
+  };
+
+  const handleBulkAccept = async () => {
+    if (!user || selectedIds.size === 0) return;
+
+    const idsToProcess = Array.from(selectedIds);
+    setSelectedIds(new Set());
+
+    // Process in parallel batches of 3
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < idsToProcess.length; i += BATCH_SIZE) {
+      const batch = idsToProcess.slice(i, i + BATCH_SIZE);
+      const apiKeyIndex = Math.floor(i / BATCH_SIZE) + 1;
+      
+      // Process batch in parallel
+      await Promise.all(
+        batch.map(id => processSubmission(id, apiKeyIndex))
+      );
+    }
+  };
+
+  const handleBulkReject = async () => {
+    if (!user || selectedIds.size === 0) return;
+
+    const idsToReject = Array.from(selectedIds);
+    setSelectedIds(new Set());
+
+    try {
+      // Update all selected submissions to rejected status
+      const { error } = await supabase
+        .from("external_submissions")
+        .update({ status: "rejected" })
+        .in("id", idsToReject);
+
+      if (error) throw error;
 
       toast({
-        title: "Candidate Accepted",
-        description: "The candidate has been added to your profiles.",
+        title: "Bulk Rejection Complete",
+        description: `${idsToReject.length} submission${idsToReject.length > 1 ? 's' : ''} rejected successfully.`,
       });
 
-      setIsDetailOpen(false);
       loadSubmissions();
     } catch (error: any) {
-      console.error("Error accepting submission:", error);
+      console.error("Error rejecting submissions:", error);
       toast({
-        title: "Failed to accept",
+        title: "Failed to reject",
         description: error.message,
         variant: "destructive",
       });
-    } finally {
-      setIsProcessing(null);
+    }
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const pendingSubmissions = filteredSubmissions.filter(s => s.status === 'pending');
+    if (selectedIds.size === pendingSubmissions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingSubmissions.map(s => s.id)));
     }
   };
 
@@ -295,35 +435,68 @@ const ExternalSubmissions = () => {
           )}
         </div>
 
-        {/* Filters */}
+        {/* Filters & Bulk Actions */}
         <Card className="mb-6">
           <CardContent className="py-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name, email, or job..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by name, email, or job..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full sm:w-40">
+                    <Filter className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="Filter status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="accepted">Accepted</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" onClick={loadSubmissions} disabled={isLoading}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filter status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="accepted">Accepted</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button variant="outline" onClick={loadSubmissions} disabled={isLoading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
+              {statusFilter === 'pending' && filteredSubmissions.length > 0 && (
+                <div className="flex items-center gap-3 pt-2 border-t">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="select-all"
+                      checked={selectedIds.size === filteredSubmissions.length && filteredSubmissions.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                    />
+                    <label 
+                      htmlFor="select-all"
+                      className="text-sm font-medium cursor-pointer select-none"
+                    >
+                      {selectedIds.size > 0 
+                        ? `${selectedIds.size} of ${filteredSubmissions.length} selected` 
+                        : `Select all ${filteredSubmissions.length} submissions`}
+                    </label>
+                  </div>
+                  {selectedIds.size > 0 && (
+                    <div className="flex gap-2 ml-auto">
+                      <Button onClick={handleBulkReject} size="sm" variant="outline">
+                        <X className="h-4 w-4 mr-2" />
+                        Reject {selectedIds.size}
+                      </Button>
+                      <Button onClick={handleBulkAccept} size="sm">
+                        <Check className="h-4 w-4 mr-2" />
+                        Accept & Process {selectedIds.size}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -350,12 +523,22 @@ const ExternalSubmissions = () => {
             {filteredSubmissions.map((submission) => (
               <Card
                 key={submission.id}
-                className="cursor-pointer hover:shadow-lg transition-all duration-300 hover:scale-[1.02] group"
+                className={`cursor-pointer hover:shadow-lg transition-all duration-300 hover:scale-[1.02] group ${
+                  selectedIds.has(submission.id) ? 'ring-2 ring-primary' : ''
+                }`}
                 onClick={() => openDetail(submission)}
               >
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
+                      {submission.status === 'pending' && (
+                        <Checkbox
+                          checked={selectedIds.has(submission.id)}
+                          onCheckedChange={() => toggleSelection(submission.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-1"
+                        />
+                      )}
                       <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
                         <User className="h-4 w-4 text-primary" />
                       </div>

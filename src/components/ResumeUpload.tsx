@@ -4,33 +4,31 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
+import { useProcessing } from '@/contexts/ProcessingContext';
 import { supabase } from '@/integrations/supabase/client';
 
 export const ResumeUpload = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
-  const [processingLogs, setProcessingLogs] = useState<Array<{ timestamp: string; level: 'info' | 'error' | 'success'; message: string }>>([]);
-  const [progress, setProgress] = useState(0);
-  const [isComplete, setIsComplete] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const processing = useProcessing();
   const [totalFiles, setTotalFiles] = useState(0);
   const [processedFiles, setProcessedFiles] = useState(0);
   const [droppedFiles, setDroppedFiles] = useState(0);
-  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
   const [isCancelled, setIsCancelled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const addLog = (level: 'info' | 'error' | 'success', message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    processing.addLog({ timestamp, level, message });
+  };
+
   const handleCancelUpload = () => {
     setIsCancelled(true);
     abortControllerRef.current?.abort();
-    setProcessingLogs(prev => [...prev, {
-      timestamp: new Date().toLocaleTimeString(),
-      level: 'info',
-      message: 'Upload cancelled by user'
-    }]);
+    addLog('info', 'Upload cancelled by user');
   };
 
   const processFiles = async (files: FileList | File[]) => {
@@ -72,15 +70,14 @@ export const ResumeUpload = () => {
 
     setUploading(true);
     setShowLogsDialog(true);
-    setProcessingLogs([]);
-    setProgress(0);
-    setIsComplete(false);
-    setHasError(false);
+    processing.startProcessing('resume');
+    processing.clearLogs();
+    processing.updateProgress(0);
     setTotalFiles(validFiles.length);
     setProcessedFiles(0);
     setDroppedFiles(0);
     setUploadedCount(0);
-    setEstimatedTimeRemaining(null);
+    processing.setEstimatedTime(null);
     setIsCancelled(false);
     abortControllerRef.current = new AbortController();
     const startTime = Date.now();
@@ -114,12 +111,8 @@ export const ResumeUpload = () => {
           session.access_token = refreshedSession.access_token;
         } catch (refreshError) {
           console.error('Session refresh error:', refreshError);
-          setProcessingLogs(prev => [...prev, {
-            timestamp: new Date().toLocaleTimeString(),
-            level: 'error',
-            message: 'Session expired. Please log in again and retry.'
-          }]);
-          setHasError(true);
+          addLog('error', 'Session expired. Please log in again and retry.');
+          processing.setError(true);
           break;
         }
         
@@ -133,11 +126,7 @@ export const ResumeUpload = () => {
           console.log(`Starting batch upload for ${batch.length} files:`, batch.map(f => f.name));
           
           batch.forEach(file => {
-            setProcessingLogs(prev => [...prev, {
-              timestamp: new Date().toLocaleTimeString(),
-              level: 'info',
-              message: `Uploading ${file.name}...`
-            }]);
+            addLog('info', `Uploading ${file.name}...`);
           });
 
           const response = await fetch(
@@ -160,21 +149,13 @@ export const ResumeUpload = () => {
             
             // Handle authentication errors specifically
             if (response.status === 401) {
-              setProcessingLogs(prev => [...prev, {
-                timestamp: new Date().toLocaleTimeString(),
-                level: 'error',
-                message: 'Authentication expired. Please log in again and retry.'
-              }]);
-              setHasError(true);
+              addLog('error', 'Authentication expired. Please log in again and retry.');
+              processing.setError(true);
               break;
             }
             
             batch.forEach(file => {
-              setProcessingLogs(prev => [...prev, {
-                timestamp: new Date().toLocaleTimeString(),
-                level: 'error',
-                message: `Failed: ${file.name} - ${errorText || response.statusText}`
-              }]);
+              addLog('error', `Failed: ${file.name} - ${errorText || response.statusText}`);
             });
             
             setDroppedFiles(prev => prev + batch.length);
@@ -185,22 +166,14 @@ export const ResumeUpload = () => {
           const result = await response.json();
           
           if (result.success) {
-            setProcessingLogs(prev => [...prev, {
-              timestamp: new Date().toLocaleTimeString(),
-              level: 'success',
-              message: `Batch complete - ${result.processed} processed successfully`
-            }]);
+            addLog('success', `Batch complete - ${result.processed} processed successfully`);
             
             successCount += result.processed;
             setUploadedCount(successCount);
             
             if (result.failed > 0 && result.failedFiles) {
               result.failedFiles.forEach((failed: any) => {
-                setProcessingLogs(prev => [...prev, {
-                  timestamp: new Date().toLocaleTimeString(),
-                  level: 'error',
-                  message: `Failed: ${failed.fileName} - ${failed.error}`
-                }]);
+                addLog('error', `Failed: ${failed.fileName} - ${failed.error}`);
               });
               failedCount += result.failed;
               setDroppedFiles(failedCount);
@@ -214,11 +187,7 @@ export const ResumeUpload = () => {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           
           batch.forEach(file => {
-            setProcessingLogs(prev => [...prev, {
-              timestamp: new Date().toLocaleTimeString(),
-              level: 'error',
-              message: `Failed: ${file.name} - ${errorMessage}`
-            }]);
+            addLog('error', `Failed: ${file.name} - ${errorMessage}`);
           });
           
           failedCount += batch.length;
@@ -230,7 +199,7 @@ export const ResumeUpload = () => {
         // Update progress with functional updates for real-time accuracy
         setProcessedFiles(prev => {
           const newProcessed = prev + batch.length;
-          setProgress((newProcessed / validFiles.length) * 100);
+          processing.updateProgress((newProcessed / validFiles.length) * 100);
           return newProcessed;
         });
         
@@ -239,14 +208,14 @@ export const ResumeUpload = () => {
         const avgTimePerBatch = elapsedTime / batchIndex;
         const remainingBatches = batches.length - batchIndex;
         if (remainingBatches > 0) {
-          setEstimatedTimeRemaining(Math.ceil((avgTimePerBatch * remainingBatches) / 1000));
+          processing.setEstimatedTime(Math.ceil((avgTimePerBatch * remainingBatches) / 1000));
         } else {
-          setEstimatedTimeRemaining(0);
+          processing.setEstimatedTime(0);
         }
       }
 
-      setIsComplete(true);
-      setEstimatedTimeRemaining(null);
+      processing.setComplete(true);
+      processing.setEstimatedTime(null);
       
       if (isCancelled || abortControllerRef.current?.signal.aborted) {
         toast({
@@ -264,7 +233,7 @@ export const ResumeUpload = () => {
         });
       }
     } catch (error) {
-      setHasError(true);
+      processing.setError(true);
       toast({
         title: 'Upload Failed',
         description: error instanceof Error ? error.message : 'Failed to upload',
@@ -378,23 +347,23 @@ export const ResumeUpload = () => {
       </div>
 
       <ProcessingLogsDialog
-        open={showLogsDialog}
-        logs={processingLogs}
-        progress={progress}
+        open={showLogsDialog && !processing.isMinimized}
+        logs={processing.logs}
+        progress={processing.progress}
         status={
           uploading 
             ? `Processing resumes... (${processedFiles}/${totalFiles} processed, ${droppedFiles} dropped)` 
             : `Upload complete - ${processedFiles} processed, ${uploadedCount} uploaded, ${droppedFiles} dropped`
         }
-        isComplete={isComplete}
-        hasError={hasError}
+        isComplete={processing.isComplete}
+        hasError={processing.hasError}
         onClose={() => {
           setShowLogsDialog(false);
-          setIsComplete(false);
-          setHasError(false);
+          processing.stopProcessing();
         }}
         onCancel={uploading ? handleCancelUpload : undefined}
-        estimatedTimeRemaining={estimatedTimeRemaining}
+        onMinimize={processing.minimize}
+        estimatedTimeRemaining={processing.estimatedTimeRemaining}
       />
     </Card>
   );

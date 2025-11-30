@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
+import { useProcessing } from '@/contexts/ProcessingContext';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -58,16 +59,8 @@ export const CandidateHunting = () => {
   const [bookmarkedEmails, setBookmarkedEmails] = useState<Set<string>>(new Set());
   const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
   const [currentSearchId, setCurrentSearchId] = useState<string | null>(null);
-  const [searchProgress, setSearchProgress] = useState(0);
-  const [searchStatus, setSearchStatus] = useState('');
-  const [processingLogs, setProcessingLogs] = useState<Array<{
-    timestamp: string;
-    level: 'info' | 'error' | 'success';
-    message: string;
-  }>>([]);
   const [showLogsDialog, setShowLogsDialog] = useState(false);
-  const [processingComplete, setProcessingComplete] = useState(false);
-  const [processingError, setProcessingError] = useState(false);
+  const processing = useProcessing();
   const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
   const [selectedJobTitles, setSelectedJobTitles] = useState<string[]>([]);
   const [isAutoSelecting, setIsAutoSelecting] = useState(false);
@@ -690,12 +683,12 @@ export const CandidateHunting = () => {
     setIsCancelled(true);
     abortControllerRef.current?.abort();
     addLog('info', 'Search cancelled by user');
-    setSearchStatus('Search cancelled');
+    processing.updateStatus('Search cancelled');
   };
 
   const addLog = (level: 'info' | 'error' | 'success', message: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    setProcessingLogs(prev => [...prev, { timestamp, level, message }]);
+    processing.addLog({ timestamp, level, message });
   };
 
   const mergeMatches = (existing: CandidateMatch[], incoming: CandidateMatch[]): CandidateMatch[] => {
@@ -723,7 +716,7 @@ export const CandidateHunting = () => {
     totalBatches: number
   ): Promise<MatchChunkResult> => {
     addLog('info', `Starting batch ${batchIndex + 1}/${totalBatches} with ${candidateIds.length} candidates...`);
-    setSearchStatus(`Processing batch ${batchIndex + 1} of ${totalBatches}...`);
+    processing.updateStatus(`Processing batch ${batchIndex + 1} of ${totalBatches}...`);
 
     const response = await fetch(
       'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/match-candidates',
@@ -783,7 +776,7 @@ export const CandidateHunting = () => {
             const processed = typeof data.processed === 'number' ? data.processed : collectedMatches.length;
             const total = typeof data.total === 'number' && data.total > 0 ? data.total : candidateIds.length;
             const progress = Math.round((processed / total) * 100);
-            setSearchProgress(progress);
+            processing.updateProgress(progress);
 
             addLog('info', `Received partial results: ${collectedMatches.length} candidates processed so far...`);
             currentEvent = '';
@@ -794,7 +787,7 @@ export const CandidateHunting = () => {
             console.error('[SSE] Error event:', data.message);
             errorMessage = data.message || 'Processing failed';
             addLog('error', errorMessage);
-            setSearchStatus('Error during processing - attempting to use partial results...');
+            processing.updateStatus('Error during processing - attempting to use partial results...');
             currentEvent = '';
             continue;
           }
@@ -806,7 +799,7 @@ export const CandidateHunting = () => {
           if (data.level && data.message) {
             if (typeof data.processed === 'number' && typeof data.total === 'number' && data.total > 0) {
               const progress = Math.round((data.processed / data.total) * 100);
-              setSearchProgress(progress);
+              processing.updateProgress(progress);
             }
 
             const message: string = data.message;
@@ -830,7 +823,7 @@ export const CandidateHunting = () => {
 
             addLog(data.level, message);
             if (!message.toLowerCase().includes('complete')) {
-              setSearchStatus(message);
+              processing.updateStatus(message);
             }
           }
 
@@ -883,12 +876,11 @@ export const CandidateHunting = () => {
 
     // Reset state
     setSearching(true);
-    setSearchProgress(0);
-    setSearchStatus('Initializing search...');
-    setProcessingLogs([]);
+    processing.startProcessing('matching');
+    processing.updateProgress(0);
+    processing.updateStatus('Initializing search...');
+    processing.clearLogs();
     setShowLogsDialog(true);
-    setProcessingComplete(false);
-    setProcessingError(false);
     setIsCancelled(false);
     abortControllerRef.current = new AbortController();
 
@@ -903,7 +895,7 @@ export const CandidateHunting = () => {
       if (!session?.access_token) throw new Error('No active session found');
 
       addLog('info', 'Fetching candidates from database...');
-      setSearchStatus('Fetching candidates...');
+      processing.updateStatus('Fetching candidates...');
 
       let query = supabase
         .from('profiles')
@@ -970,8 +962,8 @@ export const CandidateHunting = () => {
 
       if (!profileRows || profileRows.length === 0) {
         addLog('info', 'No candidates found in database');
-        setSearchStatus('No candidates found');
-        setProcessingComplete(true);
+        processing.updateStatus('No candidates found');
+        processing.setComplete(true);
         setSearching(false);
         toast({
           title: 'No Candidates Found',
@@ -982,7 +974,7 @@ export const CandidateHunting = () => {
 
       const totalCandidatesFound = profileRows.length;
       addLog('success', `Found ${totalCandidatesFound} candidates in your database`);
-      setSearchStatus(`Analyzing ${totalCandidatesFound} candidates...`);
+      processing.updateStatus(`Analyzing ${totalCandidatesFound} candidates...`);
 
       // Send ALL candidates at once - edge function will distribute across APIs
       const candidateIds = profileRows.map((p) => p.id);
@@ -997,8 +989,8 @@ export const CandidateHunting = () => {
       // Check if cancelled after matching
       if (isCancelled || abortControllerRef.current?.signal.aborted) {
         addLog('info', 'Search cancelled before saving results');
-        setSearchStatus('Search cancelled');
-        setProcessingComplete(true);
+        processing.updateStatus('Search cancelled');
+        processing.setComplete(true);
         toast({
           title: 'Search Cancelled',
           description: 'Candidate matching was cancelled',
@@ -1010,13 +1002,13 @@ export const CandidateHunting = () => {
         throw new Error('No results received from matching process');
       }
 
-      setSearchProgress(100);
+      processing.updateProgress(100);
       addLog('success', `Successfully matched ${allMatches.length} candidates`);
       console.log('Received matches from edge function:', allMatches.length);
 
       // Save search to database
       addLog('info', 'Saving search to database...');
-      setSearchStatus('Saving search results...');
+      processing.updateStatus('Saving search results...');
 
       const { data: searchData, error: searchError } = await supabase
         .from('job_searches')
@@ -1065,9 +1057,9 @@ export const CandidateHunting = () => {
       }
 
       addLog('success', 'All candidate records saved successfully');
-      setSearchProgress(100);
-      setSearchStatus('Search completed successfully');
-      setProcessingComplete(true);
+      processing.updateProgress(100);
+      processing.updateStatus('Search completed successfully');
+      processing.setComplete(true);
 
       // Sort matches by score descending to ensure highest matches appear first
       const sortedMatches = [...allMatches].sort((a, b) => b.matchScore - a.matchScore);
@@ -1086,14 +1078,14 @@ export const CandidateHunting = () => {
       // Check if it was an abort error
       if (error instanceof Error && error.name === 'AbortError') {
         addLog('info', 'Search cancelled by user');
-        setSearchStatus('Search cancelled');
-        setProcessingComplete(true);
+        processing.updateStatus('Search cancelled');
+        processing.setComplete(true);
         toast({
           title: 'Search Cancelled',
           description: 'Candidate matching was cancelled',
         });
       } else {
-        setProcessingError(true);
+        processing.setError(true);
         addLog('error', error instanceof Error ? error.message : 'Unknown error occurred');
         toast({
           title: 'Search Failed',
@@ -1330,16 +1322,16 @@ export const CandidateHunting = () => {
             )}
           </Button>
 
-          {searching && searchProgress > 0 && (
+          {searching && processing.progress > 0 && (
             <div className="space-y-2 animate-in fade-in duration-300">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground font-medium">{searchStatus}</span>
-                <span className="text-primary font-bold">{searchProgress}%</span>
+                <span className="text-muted-foreground font-medium">{processing.status}</span>
+                <span className="text-primary font-bold">{processing.progress}%</span>
               </div>
               <div className="w-full h-3 bg-secondary/30 rounded-full overflow-hidden backdrop-blur-sm">
                 <div 
                   className="h-full bg-gradient-to-r from-primary via-secondary to-primary bg-[length:200%_100%] animate-[shimmer_2s_infinite] transition-all duration-500 ease-out rounded-full shadow-[0_0_10px_var(--primary)]"
-                  style={{ width: `${searchProgress}%` }}
+                  style={{ width: `${processing.progress}%` }}
                 />
               </div>
             </div>
@@ -1609,18 +1601,18 @@ export const CandidateHunting = () => {
       })()}
 
       <ProcessingLogsDialog
-        open={showLogsDialog}
-        logs={processingLogs}
-        progress={searchProgress}
-        status={searchStatus}
-        isComplete={processingComplete}
-        hasError={processingError}
+        open={showLogsDialog && !processing.isMinimized}
+        logs={processing.logs}
+        progress={processing.progress}
+        status={processing.status}
+        isComplete={processing.isComplete}
+        hasError={processing.hasError}
         onClose={() => {
           setShowLogsDialog(false);
-          setProcessingComplete(false);
-          setProcessingError(false);
+          processing.stopProcessing();
         }}
         onCancel={searching ? handleCancelSearch : undefined}
+        onMinimize={processing.minimize}
       />
     </div>
   );

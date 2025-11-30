@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle2, XCircle, Info, Copy, Download } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Info, Copy, Download, Minimize2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/hooks/use-toast';
 
@@ -31,6 +31,7 @@ interface ProcessingLogsDialogProps {
   hasError: boolean;
   onClose: () => void;
   onCancel?: () => void;
+  onMinimize?: () => void;
   estimatedTimeRemaining?: number | null;
 }
 
@@ -43,6 +44,7 @@ export const ProcessingLogsDialog: React.FC<ProcessingLogsDialogProps> = ({
   hasError,
   onClose,
   onCancel,
+  onMinimize,
   estimatedTimeRemaining,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -94,16 +96,28 @@ export const ProcessingLogsDialog: React.FC<ProcessingLogsDialogProps> = ({
     <Dialog open={open} onOpenChange={(open) => !open && (isComplete || hasError) && onClose()}>
       <DialogContent className="max-w-[95vw] sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-4 sm:p-6">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
-            {!isComplete && !hasError && (
-              <Loader2 className="h-5 w-5 animate-spin text-primary flex-shrink-0" />
+          <div className="flex items-start justify-between gap-2">
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg flex-1">
+              {!isComplete && !hasError && (
+                <Loader2 className="h-5 w-5 animate-spin text-primary flex-shrink-0" />
+              )}
+              {isComplete && !hasError && (
+                <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+              )}
+              {hasError && <XCircle className="h-5 w-5 text-destructive flex-shrink-0" />}
+              <span className="truncate">Processing Candidates</span>
+            </DialogTitle>
+            {onMinimize && !isComplete && !hasError && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onMinimize}
+                className="h-8 w-8 p-0 flex-shrink-0"
+              >
+                <Minimize2 className="h-4 w-4" />
+              </Button>
             )}
-            {isComplete && !hasError && (
-              <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
-            )}
-            {hasError && <XCircle className="h-5 w-5 text-destructive flex-shrink-0" />}
-            <span className="truncate">Processing Candidates</span>
-          </DialogTitle>
+          </div>
           <DialogDescription className="text-xs sm:text-sm">
             {status}
           </DialogDescription>

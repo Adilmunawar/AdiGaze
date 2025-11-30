@@ -32,3 +32,6 @@ verify_jwt = true
 
 [functions.receive-external-resume]
 verify_jwt = false
+
+[functions.process-external-submission]
+verify_jwt = true

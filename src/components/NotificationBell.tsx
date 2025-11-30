@@ -61,6 +61,9 @@ export const NotificationBell = () => {
 
     const fetchNotifications = async () => {
       try {
+        // Always get the latest lastRead value from localStorage
+        const currentLastRead = getLastReadTimestamp(user.id);
+        
         // Fetch recent searches
         const { data: searches } = await supabase
           .from('job_searches')
@@ -74,7 +77,17 @@ export const NotificationBell = () => {
           .from('profiles')
           .select('id, created_at, full_name')
           .eq('user_id', user.id)
+          .eq('source', 'internal')
           .not('resume_file_url', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        // Fetch recent external submissions
+        const { data: submissions } = await supabase
+          .from('external_submissions')
+          .select('id, created_at, candidate_name, status')
+          .eq('admin_user_id', user.id)
+          .eq('status', 'pending')
           .order('created_at', { ascending: false })
           .limit(10);
 
@@ -92,7 +105,18 @@ export const NotificationBell = () => {
           created_at: u.created_at,
         }));
 
-        processNotifications(searchNotifications, uploadNotifications, storedLastRead);
+        const submissionNotifications = (submissions || []).map((s) => ({
+          id: `submission-${s.id}`,
+          type: 'upload' as const,
+          message: `New external submission: ${s.candidate_name}`,
+          created_at: s.created_at,
+        }));
+
+        processNotifications(
+          searchNotifications, 
+          [...uploadNotifications, ...submissionNotifications],
+          currentLastRead
+        );
       } catch (error) {
         console.error('Error fetching notifications:', error);
       }
@@ -134,9 +158,27 @@ export const NotificationBell = () => {
       )
       .subscribe();
 
+    // Subscribe to real-time updates for external submissions
+    const submissionChannel = supabase
+      .channel('submission-notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'external_submissions',
+          filter: `admin_user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchNotifications();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(searchChannel);
       supabase.removeChannel(uploadChannel);
+      supabase.removeChannel(submissionChannel);
     };
   }, [user, processNotifications]);
 
@@ -165,8 +207,8 @@ export const NotificationBell = () => {
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
-              {unreadCount > 9 ? '9+' : unreadCount}
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
+              {unreadCount}
             </span>
           )}
         </Button>

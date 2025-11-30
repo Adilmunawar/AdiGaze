@@ -164,12 +164,15 @@ Deno.serve(async (req) => {
 
     // Fetch all user data for backup
     console.log('Fetching user data for backup...');
-    const [profilesRes, searchesRes, matchesRes, bookmarksRes, adminRes] = await Promise.all([
+    const [profilesRes, searchesRes, matchesRes, bookmarksRes, adminRes, submissionsRes, settingsRes, tfaRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('user_id', user.id),
       supabase.from('job_searches').select('*').eq('user_id', user.id),
       supabase.from('candidate_matches').select('*'),
       supabase.from('candidate_bookmarks').select('*').eq('user_id', user.id),
       supabase.from('admin_profiles').select('*').eq('user_id', user.id),
+      supabase.from('external_submissions').select('*').eq('admin_user_id', user.id),
+      supabase.from('admin_settings').select('*').eq('user_id', user.id),
+      supabase.from('two_factor_auth').select('*').eq('user_id', user.id),
     ]);
 
     const snapshot = {
@@ -178,6 +181,9 @@ Deno.serve(async (req) => {
       candidate_matches: matchesRes.data || [],
       candidate_bookmarks: bookmarksRes.data || [],
       admin_profiles: adminRes.data || [],
+      external_submissions: submissionsRes.data || [],
+      admin_settings: settingsRes.data || [],
+      two_factor_auth: tfaRes.data || [],
       backup_timestamp: new Date().toISOString(),
       user_id: user.id,
     };

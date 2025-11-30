@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import Footer from "@/components/Footer";
 import AppSidebarLayout from "@/components/AppSidebarLayout";
-import { Loader2, ArrowLeft, Database, Download, RotateCcw, Trash2, Cloud, Inbox, Copy, Check } from "lucide-react";
+import { Loader2, ArrowLeft, Database, Download, RotateCcw, Trash2, Cloud, Inbox, Copy, Check, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -46,6 +46,9 @@ const DeveloperSettings = () => {
     candidate_matches: true,
     candidate_bookmarks: true,
     admin_profiles: true,
+    external_submissions: true,
+    admin_settings: true,
+    two_factor_auth: true,
   });
   const [activityLog, setActivityLog] = useState<BackupLogEntry[]>([]);
   const [isLogDialogOpen, setIsLogDialogOpen] = useState(false);
@@ -55,6 +58,7 @@ const DeveloperSettings = () => {
   const [isSyncingToDrive, setIsSyncingToDrive] = useState(false);
   const [isRestoringFromDrive, setIsRestoringFromDrive] = useState(false);
   const [syncToDrive, setSyncToDrive] = useState(false);
+  const [isRestoringFromFile, setIsRestoringFromFile] = useState(false);
   
   // External submissions admin settings
   const [adminEmail, setAdminEmail] = useState("");
@@ -271,6 +275,33 @@ const DeveloperSettings = () => {
         snapshot.admin_profiles = data;
       }
 
+      if (selectedTables.external_submissions) {
+        const { data, error } = await supabase
+          .from("external_submissions")
+          .select("*")
+          .eq("admin_user_id", user.id);
+        if (error) throw error;
+        snapshot.external_submissions = data;
+      }
+
+      if (selectedTables.admin_settings) {
+        const { data, error } = await supabase
+          .from("admin_settings")
+          .select("*")
+          .eq("user_id", user.id);
+        if (error) throw error;
+        snapshot.admin_settings = data;
+      }
+
+      if (selectedTables.two_factor_auth) {
+        const { data, error } = await supabase
+          .from("two_factor_auth")
+          .select("*")
+          .eq("user_id", user.id);
+        if (error) throw error;
+        snapshot.two_factor_auth = data;
+      }
+
       const { error: insertError } = await supabase.from("data_backups").insert({
         user_id: user.id,
         label: label || null,
@@ -358,6 +389,9 @@ const DeveloperSettings = () => {
         candidate_matches?: any[];
         candidate_bookmarks?: any[];
         admin_profiles?: any[];
+        external_submissions?: any[];
+        admin_settings?: any[];
+        two_factor_auth?: any[];
       };
 
       if (!snapshot) {
@@ -391,6 +425,9 @@ const DeveloperSettings = () => {
         supabase.from("job_searches").delete().eq("user_id", user.id),
         supabase.from("profiles").delete().eq("user_id", user.id),
         supabase.from("admin_profiles").delete().eq("user_id", user.id),
+        supabase.from("external_submissions").delete().eq("admin_user_id", user.id),
+        supabase.from("admin_settings").delete().eq("user_id", user.id),
+        supabase.from("two_factor_auth").delete().eq("user_id", user.id),
       ];
 
       for (const step of deleteSteps) {
@@ -435,6 +472,27 @@ const DeveloperSettings = () => {
         if (cmErr) throw cmErr;
       }
 
+      if (snapshot.external_submissions && snapshot.external_submissions.length) {
+        const { error: esErr } = await supabase
+          .from("external_submissions")
+          .insert(snapshot.external_submissions);
+        if (esErr) throw esErr;
+      }
+
+      if (snapshot.admin_settings && snapshot.admin_settings.length) {
+        const { error: asErr } = await supabase
+          .from("admin_settings")
+          .insert(snapshot.admin_settings);
+        if (asErr) throw asErr;
+      }
+
+      if (snapshot.two_factor_auth && snapshot.two_factor_auth.length) {
+        const { error: tfaErr } = await supabase
+          .from("two_factor_auth")
+          .insert(snapshot.two_factor_auth);
+        if (tfaErr) throw tfaErr;
+      }
+
       toast({
         title: "Backup restored",
         description: "Your data has been restored from the selected backup.",
@@ -449,6 +507,154 @@ const DeveloperSettings = () => {
       });
     } finally {
       setIsRestoringId(null);
+    }
+  };
+
+  const restoreFromLocalFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.name.endsWith('.json')) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload a valid JSON backup file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsRestoringFromFile(true);
+
+    try {
+      const fileContent = await file.text();
+      const snapshot = JSON.parse(fileContent) as {
+        profiles?: any[];
+        job_searches?: any[];
+        candidate_matches?: any[];
+        candidate_bookmarks?: any[];
+        admin_profiles?: any[];
+        external_submissions?: any[];
+        admin_settings?: any[];
+        two_factor_auth?: any[];
+      };
+
+      if (!snapshot || typeof snapshot !== 'object') {
+        throw new Error("Invalid backup file structure.");
+      }
+
+      // Fetch current search IDs for this user so we can clean up matches safely
+      const { data: existingSearches, error: searchesErr } = await supabase
+        .from("job_searches")
+        .select("id")
+        .eq("user_id", user.id);
+
+      if (searchesErr) {
+        console.warn("Warning while loading existing searches", searchesErr.message);
+      }
+
+      const searchIds = (existingSearches || []).map(s => s.id);
+
+      if (searchIds.length) {
+        const { error: delMatchesErr } = await supabase
+          .from("candidate_matches")
+          .delete()
+          .in("search_id", searchIds);
+        if (delMatchesErr && !String(delMatchesErr.message).includes("0 rows")) {
+          console.warn("Delete candidate_matches warning", delMatchesErr.message);
+        }
+      }
+
+      const deleteSteps = [
+        supabase.from("candidate_bookmarks").delete().eq("user_id", user.id),
+        supabase.from("job_searches").delete().eq("user_id", user.id),
+        supabase.from("profiles").delete().eq("user_id", user.id),
+        supabase.from("admin_profiles").delete().eq("user_id", user.id),
+        supabase.from("external_submissions").delete().eq("admin_user_id", user.id),
+        supabase.from("admin_settings").delete().eq("user_id", user.id),
+        supabase.from("two_factor_auth").delete().eq("user_id", user.id),
+      ];
+
+      for (const step of deleteSteps) {
+        const { error: delError } = await step;
+        if (delError && !String(delError.message).includes("0 rows")) {
+          console.warn("Delete step warning", delError.message);
+        }
+      }
+
+      // Insert parents then dependents if present in snapshot
+      if (snapshot.admin_profiles && snapshot.admin_profiles.length) {
+        const adminRows = snapshot.admin_profiles.filter(row => row.user_id === user.id);
+        if (adminRows.length) {
+          const { error: adminErr } = await supabase.from("admin_profiles").insert(adminRows);
+          if (adminErr) throw adminErr;
+        }
+      }
+
+      if (snapshot.profiles && snapshot.profiles.length) {
+        const { error: profErr } = await supabase.from("profiles").insert(snapshot.profiles);
+        if (profErr) throw profErr;
+      }
+
+      if (snapshot.job_searches && snapshot.job_searches.length) {
+        const { error: jsErr } = await supabase
+          .from("job_searches")
+          .insert(snapshot.job_searches);
+        if (jsErr) throw jsErr;
+      }
+
+      if (snapshot.candidate_bookmarks && snapshot.candidate_bookmarks.length) {
+        const { error: cbErr } = await supabase
+          .from("candidate_bookmarks")
+          .insert(snapshot.candidate_bookmarks);
+        if (cbErr) throw cbErr;
+      }
+
+      if (snapshot.candidate_matches && snapshot.candidate_matches.length) {
+        const { error: cmErr } = await supabase
+          .from("candidate_matches")
+          .insert(snapshot.candidate_matches);
+        if (cmErr) throw cmErr;
+      }
+
+      if (snapshot.external_submissions && snapshot.external_submissions.length) {
+        const { error: esErr } = await supabase
+          .from("external_submissions")
+          .insert(snapshot.external_submissions);
+        if (esErr) throw esErr;
+      }
+
+      if (snapshot.admin_settings && snapshot.admin_settings.length) {
+        const { error: asErr } = await supabase
+          .from("admin_settings")
+          .insert(snapshot.admin_settings);
+        if (asErr) throw asErr;
+      }
+
+      if (snapshot.two_factor_auth && snapshot.two_factor_auth.length) {
+        const { error: tfaErr } = await supabase
+          .from("two_factor_auth")
+          .insert(snapshot.two_factor_auth);
+        if (tfaErr) throw tfaErr;
+      }
+
+      toast({
+        title: "Backup restored",
+        description: "Your data has been restored from the uploaded file.",
+      });
+      addLog("restore", `Restored backup from local file: ${file.name}`);
+      
+      // Clear the file input
+      event.target.value = '';
+    } catch (err: any) {
+      console.error("Error restoring from local file", err);
+      toast({
+        title: "Restore failed",
+        description: err.message ?? "Failed to restore from the selected file.",
+        variant: "destructive",
+      });
+      event.target.value = '';
+    } finally {
+      setIsRestoringFromFile(false);
     }
   };
 
@@ -662,11 +868,13 @@ const DeveloperSettings = () => {
             </header>
 
             <section className="space-y-6">
-              <Card className="shadow-[var(--shadow-card)] backdrop-blur-sm bg-card/95 border-primary/10">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Cloud className="h-5 w-5" />
-                    Google Drive Backup
+              <Card className="shadow-lg backdrop-blur-md bg-gradient-to-br from-card/95 to-card/80 border-primary/20 hover:border-primary/40 transition-all duration-300">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-600/20">
+                      <Cloud className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <span>Google Drive Backup</span>
                   </CardTitle>
                   <CardDescription>
                     Sync your backup to Google Drive for additional redundancy. Only one backup file is
@@ -676,13 +884,15 @@ const DeveloperSettings = () => {
                 <CardContent className="space-y-4">
                   {!isDriveConnected ? (
                     <>
-                      <p className="text-sm text-muted-foreground">
-                        Connect your Google Drive to enable cloud backup syncing.
-                      </p>
+                      <div className="p-4 rounded-lg bg-muted/50 border border-border/50">
+                        <p className="text-sm text-muted-foreground">
+                          Connect your Google Drive to enable secure cloud backup syncing with automatic encryption.
+                        </p>
+                      </div>
                       <Button
                         onClick={handleConnectDrive}
                         disabled={isConnectingDrive}
-                        className="w-full gap-2"
+                        className="w-full gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
                       >
                         {isConnectingDrive ? (
                           <>
@@ -866,8 +1076,7 @@ const DeveloperSettings = () => {
                     Create Backup
                   </CardTitle>
                   <CardDescription>
-                    Snapshot your current profiles, searches, matches, bookmarks and admin settings
-                    into a single backup. Use the toggles below to choose which tables are included.
+                    Snapshot your recruiting data including candidates, searches, bookmarks, external submissions, and security settings.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -881,15 +1090,18 @@ const DeveloperSettings = () => {
                       placeholder="e.g. Before major import, Stable config, etc."
                     />
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">Tables to include</p>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold">Data to Include</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       {[
-                        { key: 'profiles', label: 'Candidate profiles' },
-                        { key: 'job_searches', label: 'Job searches' },
-                        { key: 'candidate_matches', label: 'Matched candidates' },
-                        { key: 'candidate_bookmarks', label: 'Bookmarks' },
-                        { key: 'admin_profiles', label: 'Admin settings' },
+                        { key: 'profiles', label: 'Candidate Profiles', desc: 'All resume data' },
+                        { key: 'job_searches', label: 'Job Searches', desc: 'Search history' },
+                        { key: 'candidate_matches', label: 'Matched Candidates', desc: 'AI match results' },
+                        { key: 'candidate_bookmarks', label: 'Bookmarks', desc: 'Saved candidates' },
+                        { key: 'admin_profiles', label: 'Admin Settings', desc: 'Your preferences' },
+                        { key: 'external_submissions', label: 'External Submissions', desc: 'Landing page resumes' },
+                        { key: 'admin_settings', label: 'Email Settings', desc: 'Submission config' },
+                        { key: 'two_factor_auth', label: '2FA Settings', desc: 'Security config' },
                       ].map(option => (
                         <button
                           key={option.key}
@@ -900,19 +1112,20 @@ const DeveloperSettings = () => {
                               [option.key]: !prev[option.key],
                             }))
                           }
-                          className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-left hover:bg-accent/40 transition-colors"
+                          className="flex flex-col gap-1 rounded-lg border border-border/60 bg-gradient-to-br from-muted/40 to-muted/20 px-3 py-3 text-left hover:border-primary/40 hover:bg-accent/40 transition-all duration-200"
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium">{option.label}</span>
                             <span
-                              className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[10px] ${selectedTables[option.key]
-                                ? 'bg-primary text-primary-foreground border-primary'
+                              className={`inline-flex h-5 w-5 items-center justify-center rounded-md border transition-all ${selectedTables[option.key]
+                                ? 'bg-primary text-primary-foreground border-primary scale-110'
                                 : 'bg-background text-muted-foreground border-border'
-                              }`}
+                                }`}
                             >
-                              {selectedTables[option.key] ? '✓' : ''}
+                              {selectedTables[option.key] && '✓'}
                             </span>
-                            <span className="text-xs font-medium">{option.label}</span>
                           </div>
+                          <span className="text-xs text-muted-foreground">{option.desc}</span>
                         </button>
                       ))}
                     </div>
@@ -961,6 +1174,41 @@ const DeveloperSettings = () => {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Upload Local Backup</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Restore data from a previously downloaded backup file.
+                    </p>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={restoreFromLocalFile}
+                        disabled={isRestoringFromFile}
+                        className="hidden"
+                        id="backup-file-upload"
+                      />
+                      <Button
+                        variant="outline"
+                        className="w-full gap-2"
+                        disabled={isRestoringFromFile}
+                        onClick={() => document.getElementById('backup-file-upload')?.click()}
+                      >
+                        {isRestoringFromFile ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Restoring...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4" />
+                            Upload & Restore Backup
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  
                   {isLoadingBackups ? (
                     <div className="flex items-center justify-center py-12 text-muted-foreground">
                       <Loader2 className="h-5 w-5 animate-spin mr-2" />
